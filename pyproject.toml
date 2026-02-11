@@ -1,0 +1,16 @@
+[project]
+name = "nvwa-lite"
+version = "0.1.0"
+description = "Dockerized scRNA-seq visualization agent powered by natural language"
+requires-python = ">=3.11"
+dependencies = [
+    "streamlit>=1.40.0",
+    "scanpy>=1.10.0",
+    "langchain>=0.3.0",
+    "langchain-openai>=0.2.0",
+    "langchain-community>=0.3.0",
+    "matplotlib>=3.9.0",
+    "anndata>=0.10.0",
+    "python-dotenv>=1.0.0",
+    "session-info>=1.0.0",
+]
