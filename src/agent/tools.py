@@ -6,7 +6,6 @@ error handling, and structured output for the agent.
 
 from __future__ import annotations
 
-import base64
 import logging
 from typing import TYPE_CHECKING
 

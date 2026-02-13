@@ -20,3 +20,6 @@ data/*.h5ad
 
 # OS
 .DS_Store
+
+# Internal planning documents (local only)
+discuss/
