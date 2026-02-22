@@ -16,17 +16,20 @@ _PROJECT_ROOT = str(Path(__file__).resolve().parent.parent.parent)
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
+import anndata as ad
 import scanpy as sc
 import streamlit as st
 
 from src.agent.core import create_agent
-from src.agent.tools import clear_last_plot_result, get_last_plot_result
+from src.agent.tools import clear_plot_results, get_plot_results, set_adata_replaced_callback
 from src.plotting.styles import configure_plot_style
+from src.types import DatasetState, detect_dataset_state
 from src.ui.components import (
     api_key_input,
     dataset_info_panel,
     dataset_selector,
     example_queries,
+    file_upload_widget,
 )
 
 # ---------------------------------------------------------------------------
@@ -50,13 +53,7 @@ logger = logging.getLogger(__name__)
 # Page config
 # ---------------------------------------------------------------------------
 
-st.set_page_config(
-    page_title="Nvwa-Lite",
-    page_icon="🧬",
-    layout="wide",
-)
-
-# Apply publication-ready plot styles
+st.set_page_config(page_title="Nvwa-Lite", page_icon="🧬", layout="wide")
 configure_plot_style()
 
 # ---------------------------------------------------------------------------
@@ -70,6 +67,10 @@ api_key = api_key_input()
 dataset_choice = dataset_selector()
 
 
+# ---------------------------------------------------------------------------
+# Dataset loading
+# ---------------------------------------------------------------------------
+
 @st.cache_resource
 def load_pbmc3k():
     """Load and cache the PBMC3k processed dataset."""
@@ -79,10 +80,70 @@ def load_pbmc3k():
     return adata
 
 
-adata = load_pbmc3k()
-dataset_info_panel(adata)
+@st.cache_resource
+def load_uploaded(path: str):
+    """Load and cache an uploaded .h5ad file."""
+    logger.info("Loading uploaded file: %s", path)
+    adata = ad.read_h5ad(path)
+    logger.info("Uploaded loaded: %d cells, %d genes", adata.n_obs, adata.n_vars)
+    return adata
+
+
+# Determine which dataset to use
+uploaded_path: Path | None = None
+if dataset_choice == "Upload your own":
+    uploaded_path = file_upload_widget()
+
+# Track current dataset source to detect changes
+current_source = "upload" if uploaded_path else "built-in"
+current_filename = uploaded_path.name if uploaded_path else "pbmc3k_processed.h5ad"
+
+# Check if we need to reload (source changed or new file uploaded)
+need_reload = (
+    "adata" not in st.session_state
+    or st.session_state.get("_dataset_source") != current_source
+    or st.session_state.get("_dataset_filename") != current_filename
+)
+
+if need_reload:
+    if uploaded_path is not None:
+        adata = load_uploaded(str(uploaded_path))
+        ds_state = detect_dataset_state(adata, source="upload", filename=uploaded_path.name)
+    else:
+        adata = load_pbmc3k()
+        ds_state = detect_dataset_state(adata, source="built-in", filename="pbmc3k_processed.h5ad")
+
+    # Store in session state
+    st.session_state.adata = adata
+    st.session_state.ds_state = ds_state
+    st.session_state._dataset_source = current_source
+    st.session_state._dataset_filename = current_filename
+    # Clear chat history when dataset changes
+    st.session_state.messages = []
+    st.session_state.chat_history = []
+
+# Use session state adata (may have been replaced by preprocessing)
+adata = st.session_state.adata
+ds_state = st.session_state.ds_state
+
+dataset_info_panel(adata, state=ds_state)
 example_queries()
 
+
+def _on_adata_replaced(new_adata) -> None:
+    """Callback when preprocessing replaces the dataset."""
+    st.session_state.adata = new_adata
+    st.session_state.ds_state = detect_dataset_state(
+        new_adata, ds_state.source, ds_state.filename,
+    )
+
+
+set_adata_replaced_callback(_on_adata_replaced)
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
 def _clean_response_text(text: str) -> str:
     """Strip base64 image markdown and data URIs that the LLM may leak."""
@@ -92,11 +153,24 @@ def _clean_response_text(text: str) -> str:
 
 
 def _render_message(msg: dict) -> None:
-    """Render a single chat message (code block, image, text)."""
-    if msg.get("code"):
-        with st.expander("📝 Generated Code", expanded=False):
-            st.code(msg["code"], language="python")
-    if msg.get("image"):
+    """Render a single chat message (code blocks, images, text)."""
+    plots = msg.get("plots", [])
+    for i, plot in enumerate(plots):
+        with st.expander(f"📝 Generated Code ({i + 1})", expanded=False):
+            st.code(plot["code"], language="python")
+        st.image(plot["image"], use_container_width=True)
+        st.download_button(
+            label=f"Download plot {i + 1}",
+            data=plot["image"],
+            file_name=f"nvwa_plot_{msg.get('idx', 0)}_{i}.png",
+            mime="image/png",
+            key=f"dl_{msg.get('idx', 0)}_{i}",
+        )
+    # Legacy single-plot support
+    if not plots and msg.get("image"):
+        if msg.get("code"):
+            with st.expander("📝 Generated Code", expanded=False):
+                st.code(msg["code"], language="python")
         st.image(msg["image"], use_container_width=True)
     if msg.get("content"):
         st.markdown(msg["content"])
@@ -108,7 +182,6 @@ def _render_message(msg: dict) -> None:
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
-
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
@@ -129,30 +202,45 @@ if not api_key:
     st.stop()
 
 if prompt := st.chat_input("Ask about your data... (e.g., 'Show me the UMAP plot')"):
-    # Display user message
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
-    # Run agent
     with st.chat_message("assistant"):
         with st.spinner("Analyzing your request..."):
-            clear_last_plot_result()
-            agent = create_agent(adata=adata, api_key=api_key)
+            clear_plot_results()
+            agent = create_agent(
+                adata=adata, api_key=api_key, dataset_state=ds_state,
+            )
             response = agent.invoke(
                 user_input=prompt,
                 chat_history=st.session_state.chat_history,
             )
-            plot_result = get_last_plot_result()
+            plot_results = get_plot_results()
             clean_text = _clean_response_text(response.text)
 
-            msg_record: dict = {"role": "assistant", "content": clean_text}
-            if plot_result:
-                msg_record["code"] = plot_result.code
-                msg_record["image"] = plot_result.image
-                with st.expander("📝 Generated Code", expanded=False):
-                    st.code(plot_result.code, language="python")
-                st.image(plot_result.image, use_container_width=True)
+            msg_idx = len(st.session_state.messages)
+            msg_record: dict = {
+                "role": "assistant",
+                "content": clean_text,
+                "idx": msg_idx,
+            }
+
+            if plot_results:
+                plots_data: list[dict] = []
+                for i, pr in enumerate(plot_results):
+                    plots_data.append({"code": pr.code, "image": pr.image})
+                    with st.expander(f"📝 Generated Code ({i + 1})", expanded=False):
+                        st.code(pr.code, language="python")
+                    st.image(pr.image, use_container_width=True)
+                    st.download_button(
+                        label=f"Download plot {i + 1}",
+                        data=pr.image,
+                        file_name=f"nvwa_plot_{msg_idx}_{i}.png",
+                        mime="image/png",
+                        key=f"dl_{msg_idx}_{i}",
+                    )
+                msg_record["plots"] = plots_data
 
             st.markdown(clean_text)
 

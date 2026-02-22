@@ -17,9 +17,11 @@ logs/*.log
 
 # Data
 data/*.h5ad
+data/uploads/
 
 # OS
 .DS_Store
 
 # Internal planning documents (local only)
 discuss/
+docs/

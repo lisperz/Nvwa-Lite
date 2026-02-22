@@ -191,3 +191,71 @@ def plot_dotplot(
 
     message = f"Dot plot of {', '.join(genes)} across {groupby} groups."
     return PlotResult(image=image, code=code, message=message)
+
+
+def plot_heatmap(
+    adata: AnnData,
+    genes: list[str],
+    groupby: str = "leiden",
+) -> PlotResult:
+    """Generate a heatmap for genes across cell groups.
+
+    Args:
+        adata: The annotated data matrix.
+        genes: List of gene names.
+        groupby: Observation key to group cells by.
+    """
+    errors: list[str] = []
+    for g in genes:
+        err = validate_gene(adata, g)
+        if err:
+            errors.append(err)
+    if errors:
+        raise ValueError(" ".join(errors))
+
+    obs_err = validate_obs_key(adata, groupby)
+    if obs_err:
+        raise ValueError(obs_err)
+
+    genes_str = str(genes)
+    code = f'sc.pl.heatmap(adata, var_names={genes_str}, groupby="{groupby}", swap_axes=True)'
+
+    logger.info("Executing: %s", code)
+    # swap_axes=True puts groups on y-axis for better label readability
+    # figsize adjusted for long group names
+    n_groups = adata.obs[groupby].nunique()
+    fig_height = max(6, n_groups * 0.5)
+    fig_width = max(10, len(genes) * 1.2)
+    sc.pl.heatmap(
+        adata, var_names=genes, groupby=groupby,
+        swap_axes=True, figsize=(fig_width, fig_height),
+        dendrogram=True, show=False,
+    )
+    image = _figure_to_bytes()
+
+    message = f"Heatmap of {', '.join(genes)} across {groupby} groups."
+    return PlotResult(image=image, code=code, message=message)
+
+
+def plot_feature(adata: AnnData, gene: str) -> PlotResult:
+    """Generate a feature plot (UMAP colored by gene expression with viridis).
+
+    Args:
+        adata: The annotated data matrix (must have UMAP coordinates).
+        gene: Gene name to visualize.
+    """
+    gene_err = validate_gene(adata, gene)
+    if gene_err:
+        raise ValueError(gene_err)
+
+    if "X_umap" not in adata.obsm:
+        raise ValueError("UMAP not computed. Run preprocessing first.")
+
+    code = f'sc.pl.umap(adata, color="{gene}", cmap="viridis")'
+
+    logger.info("Executing: %s", code)
+    sc.pl.umap(adata, color=gene, cmap="viridis", show=False)
+    image = _figure_to_bytes()
+
+    message = f"Feature plot of {gene} expression on UMAP."
+    return PlotResult(image=image, code=code, message=message)

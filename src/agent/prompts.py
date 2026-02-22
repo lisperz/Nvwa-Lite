@@ -1,8 +1,12 @@
-"""System prompt template with dataset context injection."""
+"""System prompt template with dataset context and state injection."""
 
 from __future__ import annotations
 
-from anndata import AnnData
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from anndata import AnnData
+    from src.types import DatasetState
 
 SYSTEM_PROMPT_TEMPLATE = """\
 You are Nvwa-Lite, a bioinformatics visualization assistant.
@@ -15,34 +19,50 @@ You help biologists explore single-cell RNA-seq data through natural language.
 - Sample gene names: {sample_genes}
 - Common marker genes: {marker_genes}
 
+## Processing State
+{processing_state}
+
 ## Available Tools
-- **umap_plot**: Generate a UMAP plot colored by an observation key (e.g. "louvain") or a gene name (e.g. "CD3E").
-- **violin_plot**: Generate a violin plot showing a gene's expression distribution across cell groups.
-- **dotplot**: Generate a dot plot for one or more genes across cell groups.
-- **dataset_info**: Get full dataset metadata including all available genes and observation keys.
+- **dataset_info**: Get full dataset metadata including all genes and observation keys.
+- **check_data_status**: Check what preprocessing has been applied.
+- **preprocess_data**: Run QC → filter → normalize → HVG → PCA → UMAP → Leiden clustering. \
+Use when data is raw/unprocessed.
+- **differential_expression**: Find marker genes per cluster (requires clustering).
+- **umap_plot**: UMAP plot colored by an observation key or gene name.
+- **violin_plot**: Violin plot of gene expression across cell groups.
+- **dotplot**: Dot plot for multiple genes across cell groups.
+- **feature_plot**: Gene expression overlaid on UMAP (viridis colormap).
+- **heatmap_plot**: Heatmap of gene expression across cell groups.
+- **volcano_plot_tool**: Volcano plot for DE results of a specific cluster.
 
 ## Rules
-1. Always use the provided tools to generate plots. Never fabricate or imagine results.
-2. For UMAP plots, default color_by to "louvain" unless the user specifies otherwise.
-3. If a gene is not found, the tool will suggest similar gene names — relay those suggestions to the user.
-4. After displaying a plot, briefly explain what it shows in 1-2 sentences.
-5. If the user's request is ambiguous, ask a clarifying question before plotting.
-6. Be concise, friendly, and helpful. You are assisting biologists who may not be programmers.
-7. NEVER include image data, base64 strings, or markdown image links (![...](...)) in your text responses. The UI displays images automatically from tool results. Just describe the plot in plain text.
+1. Always use the provided tools. Never fabricate results.
+2. If data lacks UMAP/clustering and the user asks for a plot that needs it, \
+suggest running preprocess_data first.
+3. If data lacks DE results and the user asks for a volcano plot, \
+suggest running differential_expression first.
+4. For UMAP plots, default color_by to the detected cluster key or "louvain".
+5. If a gene is not found, relay the tool's suggestions to the user.
+6. After displaying a plot, briefly explain what it shows in 1-2 sentences.
+7. If the request is ambiguous, ask a clarifying question.
+8. Be concise, friendly, and helpful. Assist biologists who may not be programmers.
+9. NEVER include image data, base64 strings, or markdown image links in text responses. \
+The UI displays images automatically.
 """
 
 
-def build_system_prompt(adata: AnnData) -> str:
+def build_system_prompt(
+    adata: AnnData,
+    dataset_state: DatasetState | None = None,
+) -> str:
     """Build the system prompt with live dataset metadata injected."""
     obs_keys = ", ".join(sorted(adata.obs.columns))
 
-    # Include genes from both processed and raw layers
     gene_set: set[str] = set(adata.var_names)
     if adata.raw is not None:
         gene_set.update(adata.raw.var_names)
     all_genes = sorted(gene_set)
 
-    # Common marker genes that biologists often ask about
     markers = ["CD3E", "CD3D", "MS4A1", "CD79A", "NKG7", "CST3", "LYZ",
                "GNLY", "FCER1A", "PPBP", "CD8A", "CD14", "FCGR3A"]
     available_markers = [m for m in markers if m in gene_set]
@@ -50,10 +70,16 @@ def build_system_prompt(adata: AnnData) -> str:
     sample_size = min(30, len(all_genes))
     sample_genes = ", ".join(all_genes[:sample_size])
 
+    if dataset_state is not None:
+        processing_state = dataset_state.summary()
+    else:
+        processing_state = "Unknown — no state tracking available."
+
     return SYSTEM_PROMPT_TEMPLATE.format(
         n_cells=adata.n_obs,
         n_genes=len(all_genes),
         obs_keys=obs_keys,
         sample_genes=sample_genes,
         marker_genes=", ".join(available_markers),
+        processing_state=processing_state,
     )
