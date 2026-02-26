@@ -4,7 +4,7 @@ A web app that lets biologists explore scRNA-seq data through natural language. 
 
 ## Try it Online
 
-👉 **[nvwa-lite.streamlit.app](https://lisperz-nvwa-lite.streamlit.app)** — upload a `.h5ad` file and start chatting. No setup required.
+👉 **[nvwa-lite.streamlit.app](https://nvwa-lite.streamlit.app)** — upload a `.h5ad` file and start chatting. No setup required.
 
 ## Run Locally (larger files, more memory)
 
