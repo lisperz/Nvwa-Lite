@@ -17,9 +17,6 @@ RUN uv sync --no-dev
 # Copy source code
 COPY . .
 
-# Pre-cache PBMC3k dataset into the image
-RUN uv run python -c "import scanpy as sc; sc.datasets.pbmc3k_processed()"
-
 # Create required directories
 RUN mkdir -p logs data/uploads
 
