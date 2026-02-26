@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -13,56 +12,34 @@ if TYPE_CHECKING:
     from src.types import DatasetState
 
 UPLOAD_DIR = Path("data/uploads")
-
-
-def api_key_input() -> str:
-    """Sidebar widget for OpenAI API key input."""
-    env_key = os.environ.get("OPENAI_API_KEY", "")
-
-    with st.sidebar:
-        st.subheader("OpenAI API Key")
-        if env_key:
-            st.success("API key loaded from environment.")
-            return env_key
-
-        key = st.text_input(
-            "Enter your OpenAI API key:",
-            type="password",
-            placeholder="sk-...",
-        )
-        if not key:
-            st.warning("Please provide an API key to continue.")
-        return key
+MAX_UPLOAD_MB = 500
 
 
 def file_upload_widget() -> Path | None:
     """Sidebar widget for .h5ad file upload. Returns path or None."""
     with st.sidebar:
         st.subheader("Upload Data")
+        st.caption(f"Max file size: {MAX_UPLOAD_MB} MB")
         uploaded = st.file_uploader(
             "Upload a .h5ad file",
             type=["h5ad"],
             help="Upload your own scRNA-seq dataset in .h5ad format.",
         )
         if uploaded is not None:
+            file_bytes = uploaded.getvalue()
+            file_size_mb = len(file_bytes) / (1024 * 1024)
+            if file_size_mb > MAX_UPLOAD_MB:
+                st.error(
+                    f"File too large ({file_size_mb:.0f} MB). "
+                    f"Maximum allowed: {MAX_UPLOAD_MB} MB."
+                )
+                return None
             UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
             dest = UPLOAD_DIR / uploaded.name
-            dest.write_bytes(uploaded.getvalue())
-            st.success(f"Uploaded: {uploaded.name}")
+            dest.write_bytes(file_bytes)
+            st.success(f"Uploaded: {uploaded.name} ({file_size_mb:.1f} MB)")
             return dest
     return None
-
-
-def dataset_selector() -> str:
-    """Sidebar widget for dataset selection (built-in or uploaded)."""
-    with st.sidebar:
-        st.subheader("Dataset")
-        choice = st.selectbox(
-            "Select dataset:",
-            options=["PBMC3k (built-in)", "Upload your own"],
-            index=0,
-        )
-    return choice
 
 
 def dataset_info_panel(adata: AnnData, state: DatasetState | None = None) -> None:

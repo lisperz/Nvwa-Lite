@@ -7,6 +7,7 @@ questions about their scRNA-seq data and receive visualizations.
 from __future__ import annotations
 
 import logging
+import os
 import re
 import sys
 from pathlib import Path
@@ -17,7 +18,6 @@ if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
 import anndata as ad
-import scanpy as sc
 import streamlit as st
 
 from src.agent.core import create_agent
@@ -25,9 +25,7 @@ from src.agent.tools import clear_plot_results, get_plot_results, set_adata_repl
 from src.plotting.styles import configure_plot_style
 from src.types import DatasetState, detect_dataset_state
 from src.ui.components import (
-    api_key_input,
     dataset_info_panel,
-    dataset_selector,
     example_queries,
     file_upload_widget,
 )
@@ -63,22 +61,13 @@ configure_plot_style()
 st.title("🧬 Nvwa-Lite")
 st.caption("Single-cell RNA-seq visualization powered by natural language.")
 
-api_key = api_key_input()
-dataset_choice = dataset_selector()
+api_key = os.environ.get("OPENAI_API_KEY", "")
+uploaded_path = file_upload_widget()
 
 
 # ---------------------------------------------------------------------------
 # Dataset loading
 # ---------------------------------------------------------------------------
-
-@st.cache_resource
-def load_pbmc3k():
-    """Load and cache the PBMC3k processed dataset."""
-    logger.info("Loading PBMC3k dataset...")
-    adata = sc.datasets.pbmc3k_processed()
-    logger.info("Dataset loaded: %d cells, %d genes", adata.n_obs, adata.n_vars)
-    return adata
-
 
 @st.cache_resource
 def load_uploaded(path: str):
@@ -89,36 +78,26 @@ def load_uploaded(path: str):
     return adata
 
 
-# Determine which dataset to use
-uploaded_path: Path | None = None
-if dataset_choice == "Upload your own":
-    uploaded_path = file_upload_widget()
-
 # Track current dataset source to detect changes
-current_source = "upload" if uploaded_path else "built-in"
-current_filename = uploaded_path.name if uploaded_path else "pbmc3k_processed.h5ad"
+current_filename = uploaded_path.name if uploaded_path else ""
 
-# Check if we need to reload (source changed or new file uploaded)
+# Check if we need to reload (new file uploaded)
 need_reload = (
     "adata" not in st.session_state
-    or st.session_state.get("_dataset_source") != current_source
     or st.session_state.get("_dataset_filename") != current_filename
 )
 
-if need_reload:
-    if uploaded_path is not None:
-        adata = load_uploaded(str(uploaded_path))
-        ds_state = detect_dataset_state(adata, source="upload", filename=uploaded_path.name)
-    else:
-        adata = load_pbmc3k()
-        ds_state = detect_dataset_state(adata, source="built-in", filename="pbmc3k_processed.h5ad")
+if uploaded_path is None:
+    st.info("Please upload a .h5ad file in the sidebar to get started.")
+    st.stop()
 
-    # Store in session state
+if need_reload:
+    adata = load_uploaded(str(uploaded_path))
+    ds_state = detect_dataset_state(adata, source="upload", filename=uploaded_path.name)
+
     st.session_state.adata = adata
     st.session_state.ds_state = ds_state
-    st.session_state._dataset_source = current_source
     st.session_state._dataset_filename = current_filename
-    # Clear chat history when dataset changes
     st.session_state.messages = []
     st.session_state.chat_history = []
 
@@ -198,7 +177,7 @@ for msg in st.session_state.messages:
 # ---------------------------------------------------------------------------
 
 if not api_key:
-    st.info("Please enter your OpenAI API key in the sidebar to get started.")
+    st.error("OpenAI API key not configured. Please set OPENAI_API_KEY in the environment.")
     st.stop()
 
 if prompt := st.chat_input("Ask about your data... (e.g., 'Show me the UMAP plot')"):

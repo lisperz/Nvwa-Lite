@@ -5,6 +5,7 @@ gatherUsageStats = false
 headless = true
 port = 8501
 address = "0.0.0.0"
+maxUploadSize = 500
 
 [theme]
 primaryColor = "#4CAF50"
