@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Callable
 from langchain_core.tools import tool
 
 from src.agent import analysis_tools
+from src.analysis.calculations import calculate_mito_percentage
 from src.analysis.differential import get_de_dataframe, run_differential_expression
 from src.analysis.marker_genes import get_top_marker_genes_per_cluster
 from src.analysis.preprocessing import run_preprocessing
@@ -419,6 +420,49 @@ def get_top_markers(n_genes_per_cluster: int = 10, groupby: str = "") -> str:
         return f"Unexpected error: {e}"
 
 
+@tool
+def calculate_mito_pct() -> str:
+    """Calculate mitochondrial percentage for all cells if not already present.
+
+    This identifies genes starting with "MT-" and calculates the percentage of
+    counts from these genes for each cell. Useful for quality control and filtering.
+
+    Use this when users ask about "mito percentage", "mitochondrial percentage",
+    or "pct_counts_mt" for violin plots or analysis.
+
+    Returns:
+        Summary message about the calculation.
+    """
+    adata = _get_adata()
+
+    try:
+        if "pct_counts_mt" in adata.obs.columns:
+            n_cells = adata.n_obs
+            mean_pct = adata.obs["pct_counts_mt"].mean()
+            return (
+                f"Mitochondrial percentage already calculated.\n"
+                f"Cells: {n_cells}\n"
+                f"Mean mito %: {mean_pct:.2f}%\n"
+                f"Range: {adata.obs['pct_counts_mt'].min():.2f}% - {adata.obs['pct_counts_mt'].max():.2f}%\n\n"
+                f"You can now use 'pct_counts_mt' in violin plots or other visualizations."
+            )
+
+        calculate_mito_percentage(adata)
+
+        n_cells = adata.n_obs
+        mean_pct = adata.obs["pct_counts_mt"].mean()
+        return (
+            f"Mitochondrial percentage calculated successfully.\n"
+            f"Cells: {n_cells}\n"
+            f"Mean mito %: {mean_pct:.2f}%\n"
+            f"Range: {adata.obs['pct_counts_mt'].min():.2f}% - {adata.obs['pct_counts_mt'].max():.2f}%\n\n"
+            f"You can now use 'pct_counts_mt' in violin plots or other visualizations."
+        )
+    except Exception as e:
+        logger.exception("Calculate mito percentage failed")
+        return f"Error calculating mitochondrial percentage: {e}"
+
+
 def get_all_tools() -> list:
     """Return all tools for the agent."""
     return [
@@ -427,7 +471,7 @@ def get_all_tools() -> list:
         heatmap_plot, scatter_plot, volcano_plot_tool,
         # Core tools
         dataset_info, check_data_status,
-        preprocess_data, differential_expression, get_top_markers,
+        preprocess_data, differential_expression, get_top_markers, calculate_mito_pct,
         # Analysis/reasoning tools
         *analysis_tools.get_analysis_tools(),
     ]

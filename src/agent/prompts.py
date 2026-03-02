@@ -155,6 +155,10 @@ that can help."
   - Use this BEFORE creating heatmaps to get the gene list
   - Returns comma-separated genes (duplicates automatically removed)
   - Adjust n_genes_per_cluster based on user request (5, 8, 10, 15, etc.)
+- **calculate_mito_pct**: Calculate mitochondrial percentage for quality control
+  - Use when: User asks about "mito percentage", "mitochondrial percentage", or "pct_counts_mt"
+  - Identifies MT- genes and calculates percentage of counts from these genes
+  - After calling this, users can use "pct_counts_mt" in violin plots or other visualizations
 
 ### Visualization Tools
 - **umap_plot**: 2D visualization of cells colored by clusters or genes
@@ -274,6 +278,13 @@ Red means high expression, blue means low. You can see which genes define each c
 [Use umap_plot(color_by="{cluster_key}", split_by="{cluster_key}")] \
 "Here's the UMAP split into separate panels, one for each cluster. This makes it easier to see the \
 distribution and location of each cluster individually."
+
+**User**: "Can you generate a violin plot of mito percentage?" or "Show me mitochondrial percentage" (QC workflow)
+**You**: "I'll calculate the mitochondrial percentage for your cells and then create a violin plot..." \
+[Use calculate_mito_pct()] \
+[Then use violin_plot(genes="pct_counts_mt")] \
+"Here's the violin plot showing mitochondrial percentage across clusters. Cells with high mitochondrial \
+percentage may indicate low quality (damaged cells). You can see which clusters have higher mito content."
 """
 
 

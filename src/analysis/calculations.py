@@ -174,3 +174,37 @@ def get_cluster_statistics(
     df = pd.DataFrame(results)
     df = df.sort_values("cell_count", ascending=False)
     return df
+
+
+def calculate_mito_percentage(adata: AnnData) -> None:
+    """Calculate mitochondrial percentage if not already present.
+
+    Identifies genes starting with "MT-" (case-insensitive) and calculates
+    the percentage of counts from these genes for each cell.
+
+    Args:
+        adata: The annotated data matrix (modified in-place).
+
+    Returns:
+        None (modifies adata.obs in-place)
+    """
+    import scanpy as sc
+
+    if "pct_counts_mt" in adata.obs.columns:
+        logger.info("Mitochondrial percentage already calculated.")
+        return
+
+    # Identify mitochondrial genes
+    adata.var["mt"] = adata.var_names.str.upper().str.startswith("MT-")
+    n_mt_genes = adata.var["mt"].sum()
+
+    if n_mt_genes == 0:
+        logger.warning("No mitochondrial genes (MT-*) found in dataset.")
+        adata.obs["pct_counts_mt"] = 0.0
+        return
+
+    # Calculate QC metrics
+    sc.pp.calculate_qc_metrics(
+        adata, qc_vars=["mt"], percent_top=None, log1p=False, inplace=True,
+    )
+    logger.info("Calculated mitochondrial percentage for %d cells (%d MT genes)", adata.n_obs, n_mt_genes)
