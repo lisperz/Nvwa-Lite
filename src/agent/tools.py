@@ -57,6 +57,21 @@ def _get_adata() -> AnnData:
     return _adata
 
 
+def _get_cluster_key() -> str:
+    """Auto-detect the clustering key from the dataset."""
+    if _dataset_state and _dataset_state.cluster_key:
+        return _dataset_state.cluster_key
+
+    # Fallback detection
+    adata = _get_adata()
+    for key in ("leiden", "louvain"):
+        if key in adata.obs.columns:
+            return key
+
+    # If no clustering found, return leiden as default
+    return "leiden"
+
+
 def _update_state() -> None:
     """Re-detect dataset state after a mutation."""
     global _dataset_state  # noqa: PLW0603
@@ -108,15 +123,20 @@ def umap_plot(color_by: str, show_labels: bool = False, show_legend: bool = True
 
 
 @tool
-def violin_plot(genes: str, groupby: str = "louvain") -> str:
+def violin_plot(genes: str, groupby: str = "") -> str:
     """Generate a violin plot showing gene expression distribution across groups.
 
     Args:
         genes: Gene name(s) to plot. Can be a single gene (e.g. 'MS4A1') or
                comma-separated genes (e.g. 'CD3E,CD8A').
-        groupby: The observation key to group cells by. Defaults to 'louvain'.
+        groupby: The observation key to group cells by. If empty, auto-detects clustering key.
     """
     adata = _get_adata()
+
+    # Auto-detect clustering key if not provided
+    if not groupby:
+        groupby = _get_cluster_key()
+
     try:
         # Handle both single gene and multiple genes
         if "," in genes:
@@ -132,14 +152,19 @@ def violin_plot(genes: str, groupby: str = "louvain") -> str:
 
 
 @tool
-def dotplot(genes: str, groupby: str = "louvain") -> str:
+def dotplot(genes: str, groupby: str = "") -> str:
     """Generate a dot plot for one or more genes across cell groups.
 
     Args:
         genes: Comma-separated gene names (e.g. 'CD3E,MS4A1,NKG7').
-        groupby: The observation key to group cells by. Defaults to 'louvain'.
+        groupby: The observation key to group cells by. If empty, auto-detects clustering key.
     """
     adata = _get_adata()
+
+    # Auto-detect clustering key if not provided
+    if not groupby:
+        groupby = _get_cluster_key()
+
     gene_list = [g.strip() for g in genes.split(",")]
     try:
         return _store_and_return(plot_dotplot(adata, genes=gene_list, groupby=groupby))
@@ -168,18 +193,18 @@ def feature_plot(gene: str) -> str:
 
 
 @tool
-def heatmap_plot(genes: str, groupby: str = "leiden") -> str:
+def heatmap_plot(genes: str, groupby: str = "") -> str:
     """Generate a heatmap for genes across cell groups.
 
     Args:
         genes: Comma-separated gene names (e.g. 'CD3E,MS4A1,NKG7,LYZ').
-        groupby: The observation key to group cells by. Defaults to 'leiden'. NEVER use 'louvain'.
+        groupby: The observation key to group cells by. If empty, auto-detects clustering key.
     """
     adata = _get_adata()
 
-    # Validate groupby - reject louvain
-    if groupby == "louvain":
-        return "Error: This dataset uses 'leiden' clustering, not 'louvain'. Please use groupby='leiden' instead."
+    # Auto-detect clustering key if not provided
+    if not groupby:
+        groupby = _get_cluster_key()
 
     gene_list = [g.strip() for g in genes.split(",")]
     try:
@@ -324,14 +349,19 @@ def preprocess_data(
 
 
 @tool
-def differential_expression(groupby: str = "leiden", method: str = "wilcoxon") -> str:
+def differential_expression(groupby: str = "", method: str = "wilcoxon") -> str:
     """Run differential expression analysis to find marker genes per cluster.
 
     Args:
-        groupby: The observation key for grouping (e.g. 'leiden').
+        groupby: The observation key for grouping. If empty, auto-detects clustering key.
         method: Statistical method ('wilcoxon', 't-test', 'logreg').
     """
     adata = _get_adata()
+
+    # Auto-detect clustering key if not provided
+    if not groupby:
+        groupby = _get_cluster_key()
+
     try:
         result = run_differential_expression(adata, groupby=groupby, method=method)
         _update_state()
@@ -344,7 +374,7 @@ def differential_expression(groupby: str = "leiden", method: str = "wilcoxon") -
 
 
 @tool
-def get_top_markers(n_genes_per_cluster: int = 10, groupby: str = "leiden") -> str:
+def get_top_markers(n_genes_per_cluster: int = 10, groupby: str = "") -> str:
     """Get top marker genes for each cluster from DE results.
 
     Use this when you need to get marker genes for visualization (e.g., heatmap).
@@ -352,12 +382,17 @@ def get_top_markers(n_genes_per_cluster: int = 10, groupby: str = "leiden") -> s
 
     Args:
         n_genes_per_cluster: Number of top genes to get from each cluster. Defaults to 10.
-        groupby: The observation key for grouping. Defaults to 'leiden'.
+        groupby: The observation key for grouping. If empty, auto-detects clustering key.
 
     Returns:
         Comma-separated list of top marker genes (duplicates removed).
     """
     adata = _get_adata()
+
+    # Auto-detect clustering key if not provided
+    if not groupby:
+        groupby = _get_cluster_key()
+
     try:
         genes = get_top_marker_genes_per_cluster(adata, n_genes=n_genes_per_cluster, groupby=groupby)
 

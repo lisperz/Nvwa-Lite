@@ -39,6 +39,16 @@ def _get_adata() -> AnnData:
     return _adata
 
 
+def _get_cluster_key() -> str:
+    """Auto-detect the clustering key from the dataset."""
+    adata = _get_adata()
+    for key in ("leiden", "louvain"):
+        if key in adata.obs.columns:
+            return key
+    # If no clustering found, return leiden as default
+    return "leiden"
+
+
 def _figure_to_bytes() -> bytes:
     """Capture the current matplotlib figure as PNG bytes and close it."""
     buf = io.BytesIO()
@@ -55,19 +65,24 @@ def _store_and_return(result: PlotResult) -> str:
 
 
 @tool
-def calculate_average_expression(gene: str, groupby: str = "leiden") -> str:
+def calculate_average_expression(gene: str, groupby: str = "") -> str:
     """Calculate average expression of a gene across all clusters.
 
     Use this to understand which clusters express a gene most highly.
 
     Args:
         gene: Gene name to analyze (e.g. 'LYZ', 'MS4A1').
-        groupby: Observation key for grouping. Defaults to 'leiden'.
+        groupby: Observation key for grouping. If empty, auto-detects clustering key.
 
     Returns:
         Table showing mean expression and cell count per cluster, sorted by expression.
     """
     adata = _get_adata()
+
+    # Auto-detect clustering key if not provided
+    if not groupby:
+        groupby = _get_cluster_key()
+
     try:
         df = calculate_cluster_averages(adata, gene, groupby)
 
@@ -86,19 +101,24 @@ def calculate_average_expression(gene: str, groupby: str = "leiden") -> str:
 
 
 @tool
-def find_highest_expression(gene: str, groupby: str = "leiden") -> str:
+def find_highest_expression(gene: str, groupby: str = "") -> str:
     """Find which cluster has the highest expression of a specific gene.
 
     Use this to identify cell types based on marker gene expression.
 
     Args:
         gene: Gene name to analyze (e.g. 'MS4A1' for B cells).
-        groupby: Observation key for grouping. Defaults to 'leiden'.
+        groupby: Observation key for grouping. If empty, auto-detects clustering key.
 
     Returns:
         The cluster ID with highest expression and its mean value.
     """
     adata = _get_adata()
+
+    # Auto-detect clustering key if not provided
+    if not groupby:
+        groupby = _get_cluster_key()
+
     try:
         cluster_id, mean_expr = find_top_expressing_cluster(adata, gene, groupby)
 
@@ -122,19 +142,24 @@ def find_highest_expression(gene: str, groupby: str = "leiden") -> str:
 
 
 @tool
-def highlight_cluster(cluster_id: str, color_by: str = "leiden") -> str:
+def highlight_cluster(cluster_id: str, color_by: str = "") -> str:
     """Generate a UMAP plot highlighting a specific cluster.
 
     Use this to visually emphasize a cluster of interest on the UMAP.
 
     Args:
         cluster_id: The cluster to highlight (e.g. '0', '3').
-        color_by: Observation key for coloring. Defaults to 'leiden'.
+        color_by: Observation key for coloring. If empty, auto-detects clustering key.
 
     Returns:
         UMAP plot with the specified cluster highlighted.
     """
     adata = _get_adata()
+
+    # Auto-detect clustering key if not provided
+    if not color_by:
+        color_by = _get_cluster_key()
+
     try:
         if "X_umap" not in adata.obsm:
             return "Error: UMAP not computed. Run preprocessing first."
@@ -188,7 +213,7 @@ def highlight_cluster(cluster_id: str, color_by: str = "leiden") -> str:
 
 
 @tool
-def rename_cluster(old_name: str, new_name: str, groupby: str = "leiden") -> str:
+def rename_cluster(old_name: str, new_name: str, groupby: str = "") -> str:
     """Rename a cluster to annotate it with a cell type name.
 
     Use this after identifying a cluster's cell type based on marker genes.
@@ -197,12 +222,17 @@ def rename_cluster(old_name: str, new_name: str, groupby: str = "leiden") -> str
     Args:
         old_name: Current cluster ID (e.g. '0', '3').
         new_name: New name for the cluster (e.g. 'B cells', 'T cells').
-        groupby: Observation key for grouping. Defaults to 'leiden'.
+        groupby: Observation key for grouping. If empty, auto-detects clustering key.
 
     Returns:
         Confirmation message with the renamed cluster.
     """
     adata = _get_adata()
+
+    # Auto-detect clustering key if not provided
+    if not groupby:
+        groupby = _get_cluster_key()
+
     try:
         # Verify cluster exists
         if groupby not in adata.obs.columns:
