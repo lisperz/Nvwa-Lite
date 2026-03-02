@@ -99,14 +99,20 @@ def plot_heatmap(
         raise ValueError(obs_err)
 
     genes_str = str(genes)
-    code = f'sc.pl.heatmap(adata, var_names={genes_str}, groupby="{groupby}", swap_axes=True)'
+
+    # Calculate optimal figure size based on number of genes and groups
+    n_groups = adata.obs[groupby].nunique()
+    n_genes = len(genes)
+
+    # When swap_axes=True: genes on x-axis, groups on y-axis
+    # Width: 0.3 inches per gene (minimum 10)
+    # Height: 0.6 inches per group (minimum 6)
+    fig_width = max(10, n_genes * 0.3)
+    fig_height = max(6, n_groups * 0.6)
+
+    code = f'sc.pl.heatmap(adata, var_names={genes_str}, groupby="{groupby}", swap_axes=True, figsize=({fig_width}, {fig_height}))'
 
     logger.info("Executing: %s", code)
-    # swap_axes=True puts groups on y-axis for better label readability
-    # figsize adjusted for long group names
-    n_groups = adata.obs[groupby].nunique()
-    fig_height = max(6, n_groups * 0.5)
-    fig_width = max(10, len(genes) * 1.2)
     sc.pl.heatmap(
         adata, var_names=genes, groupby=groupby,
         swap_axes=True, figsize=(fig_width, fig_height),
