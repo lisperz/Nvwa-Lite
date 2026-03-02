@@ -43,6 +43,7 @@ def plot_umap(
     title: str | None = None,
     show_labels: bool = False,
     show_legend: bool = True,
+    split_by: str | None = None,
 ) -> PlotResult:
     """Generate a UMAP plot colored by an obs key or gene.
 
@@ -52,6 +53,7 @@ def plot_umap(
         title: Optional plot title.
         show_labels: Whether to show cluster labels on the plot.
         show_legend: Whether to show the legend.
+        split_by: Optional observation key to split the plot into separate panels.
 
     Returns:
         PlotResult with image, code, and description.
@@ -66,6 +68,12 @@ def plot_umap(
             err = validate_obs_key(adata, color)
         raise ValueError(err or f"'{color}' not found as gene or observation key.")
 
+    # Validate split_by if provided
+    if split_by:
+        split_err = validate_obs_key(adata, split_by)
+        if split_err:
+            raise ValueError(split_err)
+
     # Build code string
     code = f'sc.pl.umap(adata, color="{color}"'
     if title:
@@ -74,39 +82,85 @@ def plot_umap(
         code += ", label=True"
     if not show_legend:
         code += ", legend_loc=None"
+    if split_by:
+        code += f', groups="{split_by}"'
     code += ")"
 
     logger.info("Executing: %s", code)
 
-    # Generate plot
-    legend_loc = "right margin" if show_legend else None
-    sc.pl.umap(
-        adata,
-        color=color,
-        title=title,
-        legend_loc=legend_loc,
-        add_outline=show_labels,
-        show=False,
-    )
-
-    # Add labels if requested
-    if show_labels and is_obs:
-        # Get cluster centers for labeling
+    # Generate plot with split if requested
+    if split_by:
+        # Create separate panels for each group in split_by
         import numpy as np
-        umap_coords = adata.obsm["X_umap"]
-        clusters = adata.obs[color].values
-        for cluster in np.unique(clusters):
-            mask = clusters == cluster
-            center_x = np.median(umap_coords[mask, 0])
-            center_y = np.median(umap_coords[mask, 1])
-            plt.text(center_x, center_y, str(cluster),
-                    fontsize=12, fontweight='bold',
-                    ha='center', va='center')
+        groups = adata.obs[split_by].unique()
+        n_groups = len(groups)
+
+        # Calculate grid layout
+        n_cols = min(4, n_groups)  # Max 4 columns
+        n_rows = (n_groups + n_cols - 1) // n_cols
+
+        fig, axes = plt.subplots(n_rows, n_cols, figsize=(5 * n_cols, 5 * n_rows))
+        if n_groups == 1:
+            axes = [axes]
+        else:
+            axes = axes.flatten() if n_groups > 1 else [axes]
+
+        # Plot each group in a separate panel
+        for idx, group in enumerate(sorted(groups)):
+            ax = axes[idx]
+
+            # Create a mask for this group
+            mask = adata.obs[split_by] == group
+            subset = adata[mask, :]
+
+            # Plot UMAP for this subset
+            sc.pl.umap(
+                subset,
+                color=color,
+                ax=ax,
+                title=f"{split_by}: {group}",
+                legend_loc=None,
+                show=False,
+            )
+
+        # Hide unused subplots
+        for idx in range(n_groups, len(axes)):
+            axes[idx].axis('off')
+
+        plt.tight_layout()
+    else:
+        # Generate regular plot
+        legend_loc = "right margin" if show_legend else None
+        sc.pl.umap(
+            adata,
+            color=color,
+            title=title,
+            legend_loc=legend_loc,
+            add_outline=show_labels,
+            show=False,
+        )
+
+        # Add labels if requested
+        if show_labels and is_obs:
+            # Get cluster centers for labeling
+            import numpy as np
+            umap_coords = adata.obsm["X_umap"]
+            clusters = adata.obs[color].values
+            for cluster in np.unique(clusters):
+                mask = clusters == cluster
+                center_x = np.median(umap_coords[mask, 0])
+                center_y = np.median(umap_coords[mask, 1])
+                plt.text(center_x, center_y, str(cluster),
+                        fontsize=12, fontweight='bold',
+                        ha='center', va='center')
 
     image = _figure_to_bytes()
 
     label = "cell type" if color == "louvain" else color
-    message = f"UMAP plot colored by {label}."
+    if split_by:
+        message = f"UMAP plot colored by {label}, split by {split_by} into {len(groups)} panels."
+    else:
+        message = f"UMAP plot colored by {label}."
     return PlotResult(image=image, code=code, message=message)
 
 

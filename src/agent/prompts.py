@@ -159,6 +159,7 @@ that can help."
 - **umap_plot**: 2D visualization of cells colored by clusters or genes
   - Can show cluster labels directly on plot (show_labels=True)
   - Can hide legend (show_legend=False)
+  - Can split into separate panels by cluster (split_by="{cluster_key}") - use this when user asks to "split by cluster" or "show each cluster separately"
 - **violin_plot**: Show gene expression distribution across groups
   - Supports single gene or multiple genes (comma-separated)
 - **dotplot**: Compare multiple genes across groups
@@ -266,6 +267,12 @@ Would you like me to start with step 1?"
 [Then use heatmap_plot with the returned genes] \
 "This heatmap shows [X] unique genes (duplicates removed). Each row is a gene, each column is a cluster. \
 Red means high expression, blue means low. You can see which genes define each cluster."
+
+**User**: "Can you show the UMAP again, but split the view by cluster? I want to see each cluster in a separate panel."
+**You**: "I'll create a UMAP plot with each cluster shown in a separate panel..." \
+[Use umap_plot(color_by="{cluster_key}", split_by="{cluster_key}")] \
+"Here's the UMAP split into separate panels, one for each cluster. This makes it easier to see the \
+distribution and location of each cluster individually."
 """
 
 

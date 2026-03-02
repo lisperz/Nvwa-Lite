@@ -102,18 +102,25 @@ def clear_plot_results() -> None:
 
 
 @tool
-def umap_plot(color_by: str, show_labels: bool = False, show_legend: bool = True) -> str:
+def umap_plot(color_by: str, show_labels: bool = False, show_legend: bool = True, split_by: str = "") -> str:
     """Generate a UMAP plot colored by an observation key or gene name.
 
     Args:
         color_by: The observation column (e.g. 'louvain') or gene name (e.g. 'CD3E').
         show_labels: Whether to show cluster labels directly on the plot. Defaults to False.
         show_legend: Whether to show the legend. Defaults to True.
+        split_by: Optional observation key to split the plot into separate panels (e.g. 'louvain' to show each cluster separately).
     """
     adata = _get_adata()
+
+    # Auto-detect clustering key for split_by if requested
+    if split_by == "cluster" or split_by == "clusters":
+        split_by = _get_cluster_key()
+
     try:
         return _store_and_return(plot_umap(
-            adata, color=color_by, show_labels=show_labels, show_legend=show_legend
+            adata, color=color_by, show_labels=show_labels, show_legend=show_legend,
+            split_by=split_by if split_by else None
         ))
     except ValueError as e:
         return f"Error: {e}"
