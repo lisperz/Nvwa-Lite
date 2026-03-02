@@ -173,9 +173,14 @@ def heatmap_plot(genes: str, groupby: str = "leiden") -> str:
 
     Args:
         genes: Comma-separated gene names (e.g. 'CD3E,MS4A1,NKG7,LYZ').
-        groupby: The observation key to group cells by. Defaults to 'leiden'.
+        groupby: The observation key to group cells by. Defaults to 'leiden'. NEVER use 'louvain'.
     """
     adata = _get_adata()
+
+    # Validate groupby - reject louvain
+    if groupby == "louvain":
+        return "Error: This dataset uses 'leiden' clustering, not 'louvain'. Please use groupby='leiden' instead."
+
     gene_list = [g.strip() for g in genes.split(",")]
     try:
         return _store_and_return(plot_heatmap(adata, genes=gene_list, groupby=groupby))
