@@ -75,25 +75,43 @@ identify what cell types you have."
 You MUST provide biological context after every visualization:
 
 ### Marker Gene Knowledge:
-- **T cells**: CD3E, CD3D, CD8A, CD4, CD2
-- **B cells**: MS4A1 (CD20), CD79A, CD79B, CD19
-- **NK cells**: NKG7, GNLY, NCAM1, KLRD1
-- **Monocytes**: CD14, LYZ, CST3, S100A8, S100A9
-- **Dendritic cells**: FCER1A, CST3, CD1C
-- **Megakaryocytes**: PPBP, PF4
-- **Macrophages**: CD68, FCGR3A (CD16)
+The dataset contains: {marker_genes}
+
+**Common cell type markers (use only if genes are present in dataset):**
+- **Immune cells**:
+  - T cells: CD3E, CD3D, CD8A, CD4, CD2
+  - B cells: MS4A1 (CD20), CD79A, CD79B, CD19
+  - NK cells: NKG7, GNLY, NCAM1, KLRD1
+  - Monocytes: CD14, LYZ, CST3, S100A8, S100A9
+  - Dendritic cells: FCER1A, CST3, CD1C
+  - Macrophages: CD68, FCGR3A (CD16)
+- **Brain cells**:
+  - Excitatory neurons: SLC17A7, SLC17A6, CAMK2A
+  - Inhibitory neurons: GAD1, GAD2, SLC32A1
+  - Astrocytes: AQP4, GFAP, SLC1A3, SLC1A2
+  - Oligodendrocytes: MBP, MOG, OLIG1, OLIG2
+  - Microglia: CX3CR1, P2RY12, TMEM119
+  - Dopaminergic neurons: TH, SLC6A3, DRD2
+- **Other tissues**:
+  - Hepatocytes: ALB, AFP, CYP3A4
+  - Kidney: NPHS1, NPHS2, SLC12A1
+  - Heart: MYH6, MYH7, TNNT2
+  - Lung: SFTPC, SFTPB, SCGB1A1
+
+**IMPORTANT**: Only use marker knowledge for genes that actually exist in this dataset. If the dataset uses \
+Ensembl IDs or lacks common markers, rely on differential expression results instead of assuming cell types.
 
 ### Interpretation Guidelines:
 - **UMAP plots**: Describe clustering patterns (distinct populations vs. continuum), mention if you see \
 clear separation or gradual transitions
-- **Marker genes**: When you see known markers, identify likely cell types (e.g., "High CD3E and CD8A \
-in cluster 2 suggests cytotoxic T cells")
+- **Marker genes**: When you see known markers that exist in the dataset, identify likely cell types. \
+If markers are absent, describe expression patterns without assuming cell types.
 - **Expression patterns**: Explain what high/low expression means biologically, not just statistically
-- **Comparisons**: Describe biological significance (e.g., "Cluster 0 shows high inflammatory markers, \
-suggesting activated immune cells")
+- **Comparisons**: Describe biological significance based on actual genes present
 
-If you cannot provide biological interpretation, say: "I don't have enough information to identify \
-these cell types. Let me run differential expression to find marker genes that can help."
+If you cannot provide biological interpretation (e.g., Ensembl IDs, unknown tissue), say: "I don't have \
+enough information to identify these cell types. Let me run differential expression to find marker genes \
+that can help."
 
 ## Available Tools
 - **dataset_info**: Get full dataset metadata
@@ -164,9 +182,40 @@ def build_system_prompt(
         gene_set.update(adata.raw.var_names)
     all_genes = sorted(gene_set)
 
-    markers = ["CD3E", "CD3D", "MS4A1", "CD79A", "NKG7", "CST3", "LYZ",
-               "GNLY", "FCER1A", "PPBP", "CD8A", "CD14", "FCGR3A"]
-    available_markers = [m for m in markers if m in gene_set]
+    # Detect gene ID format
+    sample_genes_list = list(all_genes[:10])
+    uses_ensembl = any(g.startswith("ENS") for g in sample_genes_list)
+
+    # Try to detect tissue type and provide relevant marker knowledge
+    # Check for common marker genes across different tissue types
+    tissue_markers = {
+        "immune": ["CD3E", "CD3D", "MS4A1", "CD79A", "NKG7", "CST3", "LYZ",
+                   "GNLY", "FCER1A", "PPBP", "CD8A", "CD14", "FCGR3A", "CD4", "CD19"],
+        "brain": ["SLC17A7", "GAD1", "GAD2", "AQP4", "MBP", "OLIG1", "OLIG2",
+                  "GFAP", "SLC1A3", "PDGFRA", "TH", "DBH", "SLC6A3"],
+        "liver": ["ALB", "AFP", "CYP3A4", "HNF4A", "APOA1", "APOB"],
+        "kidney": ["NPHS1", "NPHS2", "SLC12A1", "SLC12A3", "AQP2"],
+        "heart": ["MYH6", "MYH7", "TNNT2", "TNNI3", "MYL2"],
+        "lung": ["SFTPC", "SFTPB", "SCGB1A1", "FOXJ1", "MUC5AC"],
+    }
+
+    detected_tissue = None
+    available_markers = []
+
+    for tissue, markers in tissue_markers.items():
+        found = [m for m in markers if m in gene_set]
+        if len(found) >= 3:  # If we find at least 3 markers, likely this tissue
+            detected_tissue = tissue
+            available_markers = found
+            break
+
+    # Build marker gene context
+    if available_markers:
+        marker_context = f"Detected tissue type: {detected_tissue}\nAvailable marker genes: {', '.join(available_markers[:15])}"
+    elif uses_ensembl:
+        marker_context = "Dataset uses Ensembl gene IDs. Marker gene identification will require differential expression analysis."
+    else:
+        marker_context = "No common marker genes detected. Use differential_expression to identify distinguishing genes for each cluster."
 
     sample_size = min(30, len(all_genes))
     sample_genes = ", ".join(all_genes[:sample_size])
@@ -194,6 +243,6 @@ def build_system_prompt(
         n_genes=len(all_genes),
         obs_keys=obs_keys,
         sample_genes=sample_genes,
-        marker_genes=", ".join(available_markers),
+        marker_genes=marker_context,
         processing_state=processing_state,
     )
