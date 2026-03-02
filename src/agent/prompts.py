@@ -119,10 +119,15 @@ that can help."
 - **preprocess_data**: Quality control → normalization → clustering (explain: "group similar cells")
 - **differential_expression**: Find marker genes per cluster (explain: "identify distinguishing genes")
 - **umap_plot**: 2D visualization of cells colored by clusters or genes
+  - Can show cluster labels directly on plot (show_labels=True)
+  - Can hide legend (show_legend=False)
 - **violin_plot**: Show gene expression distribution across groups
+  - Supports single gene or multiple genes (comma-separated)
 - **dotplot**: Compare multiple genes across groups
 - **feature_plot**: Show where a gene is expressed on the UMAP
 - **heatmap_plot**: Compare gene expression patterns across clusters
+- **scatter_plot**: Show correlation between two genes (gene-gene scatter plot)
+  - Can color points by cluster or another gene
 - **volcano_plot_tool**: Show significantly different genes for a cluster
 
 ## Interaction Rules

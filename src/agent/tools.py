@@ -13,14 +13,8 @@ from langchain_core.tools import tool
 
 from src.analysis.differential import get_de_dataframe, run_differential_expression
 from src.analysis.preprocessing import run_preprocessing
-from src.plotting.executor import (
-    PlotResult,
-    plot_dotplot,
-    plot_feature,
-    plot_heatmap,
-    plot_umap,
-    plot_violin,
-)
+from src.plotting.comparison import plot_dotplot, plot_heatmap, plot_scatter
+from src.plotting.executor import PlotResult, plot_feature, plot_umap, plot_violin
 from src.plotting.volcano import plot_volcano
 from src.types import DatasetState, detect_dataset_state
 
@@ -85,15 +79,19 @@ def clear_plot_results() -> None:
 
 
 @tool
-def umap_plot(color_by: str) -> str:
+def umap_plot(color_by: str, show_labels: bool = False, show_legend: bool = True) -> str:
     """Generate a UMAP plot colored by an observation key or gene name.
 
     Args:
         color_by: The observation column (e.g. 'louvain') or gene name (e.g. 'CD3E').
+        show_labels: Whether to show cluster labels directly on the plot. Defaults to False.
+        show_legend: Whether to show the legend. Defaults to True.
     """
     adata = _get_adata()
     try:
-        return _store_and_return(plot_umap(adata, color=color_by))
+        return _store_and_return(plot_umap(
+            adata, color=color_by, show_labels=show_labels, show_legend=show_legend
+        ))
     except ValueError as e:
         return f"Error: {e}"
     except Exception as e:
@@ -102,16 +100,22 @@ def umap_plot(color_by: str) -> str:
 
 
 @tool
-def violin_plot(gene: str, groupby: str = "louvain") -> str:
-    """Generate a violin plot showing a gene's expression distribution across groups.
+def violin_plot(genes: str, groupby: str = "louvain") -> str:
+    """Generate a violin plot showing gene expression distribution across groups.
 
     Args:
-        gene: The gene name to plot (e.g. 'MS4A1').
+        genes: Gene name(s) to plot. Can be a single gene (e.g. 'MS4A1') or
+               comma-separated genes (e.g. 'CD3E,CD8A').
         groupby: The observation key to group cells by. Defaults to 'louvain'.
     """
     adata = _get_adata()
     try:
-        return _store_and_return(plot_violin(adata, gene=gene, groupby=groupby))
+        # Handle both single gene and multiple genes
+        if "," in genes:
+            gene_list = [g.strip() for g in genes.split(",")]
+        else:
+            gene_list = genes.strip()
+        return _store_and_return(plot_violin(adata, genes=gene_list, groupby=groupby))
     except ValueError as e:
         return f"Error: {e}"
     except Exception as e:
@@ -171,6 +175,26 @@ def heatmap_plot(genes: str, groupby: str = "leiden") -> str:
         return f"Error: {e}"
     except Exception as e:
         logger.exception("Heatmap plot failed")
+        return f"Unexpected error: {e}"
+
+
+@tool
+def scatter_plot(gene_x: str, gene_y: str, color_by: str = "") -> str:
+    """Generate a scatter plot showing correlation between two genes.
+
+    Args:
+        gene_x: Gene name for x-axis (e.g. 'CD3E').
+        gene_y: Gene name for y-axis (e.g. 'CD8A').
+        color_by: Optional observation key or gene to color points by. Leave empty for no coloring.
+    """
+    adata = _get_adata()
+    try:
+        color = color_by if color_by else None
+        return _store_and_return(plot_scatter(adata, gene_x=gene_x, gene_y=gene_y, color_by=color))
+    except ValueError as e:
+        return f"Error: {e}"
+    except Exception as e:
+        logger.exception("Scatter plot failed")
         return f"Unexpected error: {e}"
 
 
@@ -296,7 +320,7 @@ def get_all_tools() -> list:
     """Return all tools for the agent."""
     return [
         umap_plot, violin_plot, dotplot, feature_plot,
-        heatmap_plot, volcano_plot_tool,
+        heatmap_plot, scatter_plot, volcano_plot_tool,
         dataset_info, check_data_status,
         preprocess_data, differential_expression,
     ]
