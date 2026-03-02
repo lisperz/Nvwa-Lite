@@ -200,12 +200,13 @@ def feature_plot(gene: str) -> str:
 
 
 @tool
-def heatmap_plot(genes: str, groupby: str = "") -> str:
+def heatmap_plot(genes: str, groupby: str = "", n_genes_per_cluster: int = 0) -> str:
     """Generate a heatmap for genes across cell groups.
 
     Args:
         genes: Comma-separated gene names (e.g. 'CD3E,MS4A1,NKG7,LYZ').
         groupby: The observation key to group cells by. If empty, auto-detects clustering key.
+        n_genes_per_cluster: Optional context about how many genes per cluster were requested (for display purposes).
     """
     adata = _get_adata()
 
@@ -215,7 +216,9 @@ def heatmap_plot(genes: str, groupby: str = "") -> str:
 
     gene_list = [g.strip() for g in genes.split(",")]
     try:
-        return _store_and_return(plot_heatmap(adata, genes=gene_list, groupby=groupby))
+        return _store_and_return(plot_heatmap(
+            adata, genes=gene_list, groupby=groupby, n_genes_per_cluster=n_genes_per_cluster
+        ))
     except ValueError as e:
         return f"Error: {e}"
     except Exception as e:

@@ -78,6 +78,7 @@ def plot_heatmap(
     adata: AnnData,
     genes: list[str],
     groupby: str = "leiden",
+    n_genes_per_cluster: int = 0,
 ) -> PlotResult:
     """Generate a heatmap for genes across cell groups.
 
@@ -85,6 +86,7 @@ def plot_heatmap(
         adata: The annotated data matrix.
         genes: List of gene names.
         groupby: Observation key to group cells by.
+        n_genes_per_cluster: Optional context about how many genes per cluster were requested.
     """
     errors: list[str] = []
     for g in genes:
@@ -98,8 +100,6 @@ def plot_heatmap(
     if obs_err:
         raise ValueError(obs_err)
 
-    genes_str = str(genes)
-
     # Calculate optimal figure size based on number of genes and groups
     n_groups = adata.obs[groupby].nunique()
     n_genes = len(genes)
@@ -110,7 +110,20 @@ def plot_heatmap(
     fig_width = max(10, n_genes * 0.3)
     fig_height = max(6, n_groups * 0.6)
 
-    code = f'sc.pl.heatmap(adata, var_names={genes_str}, groupby="{groupby}", swap_axes=True, figsize=({fig_width}, {fig_height}))'
+    # Build informative code string
+    if n_genes_per_cluster > 0:
+        # Show context about top N genes per cluster
+        code = f"# Top {n_genes_per_cluster} marker genes per cluster ({n_genes} unique genes after deduplication)\n"
+        code += f"# Clusters: {n_groups}, Genes: {n_genes}\n"
+        code += f'top_genes = {genes[:5] + ["..."] if n_genes > 5 else genes}\n'
+        code += f'sc.pl.heatmap(adata, var_names=top_genes, groupby="{groupby}", swap_axes=True, figsize=({fig_width:.1f}, {fig_height:.1f}))'
+    else:
+        # Show full gene list for manually specified genes
+        if n_genes <= 10:
+            genes_str = str(genes)
+        else:
+            genes_str = str(genes[:5] + ["..."] + genes[-2:])
+        code = f'sc.pl.heatmap(adata, var_names={genes_str}, groupby="{groupby}", swap_axes=True, figsize=({fig_width:.1f}, {fig_height:.1f}))'
 
     logger.info("Executing: %s", code)
     sc.pl.heatmap(
