@@ -13,6 +13,7 @@ from langchain_core.tools import tool
 
 from src.agent import analysis_tools
 from src.analysis.differential import get_de_dataframe, run_differential_expression
+from src.analysis.marker_genes import get_top_marker_genes_per_cluster
 from src.analysis.preprocessing import run_preprocessing
 from src.plotting.comparison import plot_dotplot, plot_heatmap, plot_scatter
 from src.plotting.executor import PlotResult, plot_feature, plot_umap, plot_violin
@@ -315,10 +316,6 @@ def preprocess_data(
     except Exception as e:
         logger.exception("Preprocessing failed")
         return f"Preprocessing error: {e}"
-        return result.message
-    except Exception as e:
-        logger.exception("Preprocessing failed")
-        return f"Preprocessing error: {e}"
 
 
 @tool
@@ -341,6 +338,37 @@ def differential_expression(groupby: str = "leiden", method: str = "wilcoxon") -
         return f"DE error: {e}"
 
 
+@tool
+def get_top_markers(n_genes_per_cluster: int = 10, groupby: str = "leiden") -> str:
+    """Get top marker genes for each cluster from DE results.
+
+    Use this when you need to get marker genes for visualization (e.g., heatmap).
+    Returns a comma-separated list of unique genes.
+
+    Args:
+        n_genes_per_cluster: Number of top genes to get from each cluster. Defaults to 10.
+        groupby: The observation key for grouping. Defaults to 'leiden'.
+
+    Returns:
+        Comma-separated list of top marker genes (duplicates removed).
+    """
+    adata = _get_adata()
+    try:
+        genes = get_top_marker_genes_per_cluster(adata, n_genes=n_genes_per_cluster, groupby=groupby)
+
+        result = f"Top {n_genes_per_cluster} marker genes per cluster:\n"
+        result += f"Total unique genes: {len(genes)}\n\n"
+        result += "Genes (comma-separated for heatmap):\n"
+        result += ",".join(genes)
+
+        return result
+    except ValueError as e:
+        return f"Error: {e}"
+    except Exception as e:
+        logger.exception("Get top markers failed")
+        return f"Unexpected error: {e}"
+
+
 def get_all_tools() -> list:
     """Return all tools for the agent."""
     return [
@@ -349,7 +377,7 @@ def get_all_tools() -> list:
         heatmap_plot, scatter_plot, volcano_plot_tool,
         # Core tools
         dataset_info, check_data_status,
-        preprocess_data, differential_expression,
+        preprocess_data, differential_expression, get_top_markers,
         # Analysis/reasoning tools
         *analysis_tools.get_analysis_tools(),
     ]

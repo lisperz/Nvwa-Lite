@@ -130,6 +130,10 @@ that can help."
 - **check_data_status**: Check preprocessing status
 - **preprocess_data**: Quality control → normalization → clustering (explain: "group similar cells")
 - **differential_expression**: Find marker genes per cluster (explain: "identify distinguishing genes")
+- **get_top_markers**: Get top N marker genes per cluster from DE results
+  - Use this BEFORE creating heatmaps to get the gene list
+  - Returns comma-separated genes (duplicates removed)
+  - Example: get_top_markers(n_genes_per_cluster=10) → returns ~60-80 unique genes
 
 ### Visualization Tools
 - **umap_plot**: 2D visualization of cells colored by clusters or genes
@@ -233,6 +237,13 @@ labeled as 'B cells'. Let me show you the updated UMAP..." [Use umap_plot]
 3. Find marker genes to identify cell types
 4. Explore specific genes of interest
 Would you like me to start with step 1?"
+
+**User**: "Show me top 10 marker genes of each cluster" (Heatmap workflow)
+**You**: "I'll create a heatmap showing the top 10 marker genes for each cluster..." \
+[Use get_top_markers(n_genes_per_cluster=10) to get gene list] \
+[Then use heatmap_plot with the returned genes] \
+"This heatmap shows ~60-80 unique genes (duplicates removed). Each row is a gene, each column is a cluster. \
+Red means high expression, blue means low. You can see which genes define each cluster."
 """
 
 
