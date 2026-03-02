@@ -1,0 +1,242 @@
+"""Reasoning and analysis tools for the agent.
+
+Provides tools for calculating expression, finding patterns, highlighting clusters,
+and annotating cell types.
+"""
+
+from __future__ import annotations
+
+import io
+import logging
+from typing import TYPE_CHECKING
+
+import matplotlib.pyplot as plt
+import numpy as np
+from langchain_core.tools import tool
+
+from src.analysis.calculations import (
+    calculate_cluster_averages,
+    find_top_expressing_cluster,
+    get_cluster_cell_indices,
+    rename_cluster_labels,
+)
+from src.plotting.executor import PlotResult
+
+if TYPE_CHECKING:
+    from anndata import AnnData
+
+logger = logging.getLogger(__name__)
+
+# Global state (shared with main tools.py)
+_adata: AnnData | None = None
+_plot_results: list[PlotResult] = []
+
+
+def _get_adata() -> AnnData:
+    """Get the bound dataset."""
+    if _adata is None:
+        raise RuntimeError("No dataset loaded.")
+    return _adata
+
+
+def _figure_to_bytes() -> bytes:
+    """Capture the current matplotlib figure as PNG bytes and close it."""
+    buf = io.BytesIO()
+    plt.savefig(buf, format="png", bbox_inches="tight")
+    plt.close("all")
+    buf.seek(0)
+    return buf.read()
+
+
+def _store_and_return(result: PlotResult) -> str:
+    """Append a PlotResult to the buffer and return a text summary."""
+    _plot_results.append(result)
+    return f"Plot generated successfully.\nCode: {result.code}\n{result.message}"
+
+
+@tool
+def calculate_average_expression(gene: str, groupby: str = "leiden") -> str:
+    """Calculate average expression of a gene across all clusters.
+
+    Use this to understand which clusters express a gene most highly.
+
+    Args:
+        gene: Gene name to analyze (e.g. 'LYZ', 'MS4A1').
+        groupby: Observation key for grouping. Defaults to 'leiden'.
+
+    Returns:
+        Table showing mean expression and cell count per cluster, sorted by expression.
+    """
+    adata = _get_adata()
+    try:
+        df = calculate_cluster_averages(adata, gene, groupby)
+
+        # Format as a readable table
+        result = f"Average expression of {gene} across {groupby} clusters:\n\n"
+        result += df.to_string(index=False)
+        result += f"\n\nHighest expression: Cluster {df.iloc[0]['cluster']} "
+        result += f"(mean={df.iloc[0]['mean_expression']:.2f})"
+
+        return result
+    except ValueError as e:
+        return f"Error: {e}"
+    except Exception as e:
+        logger.exception("Calculate average expression failed")
+        return f"Unexpected error: {e}"
+
+
+@tool
+def find_highest_expression(gene: str, groupby: str = "leiden") -> str:
+    """Find which cluster has the highest expression of a specific gene.
+
+    Use this to identify cell types based on marker gene expression.
+
+    Args:
+        gene: Gene name to analyze (e.g. 'MS4A1' for B cells).
+        groupby: Observation key for grouping. Defaults to 'leiden'.
+
+    Returns:
+        The cluster ID with highest expression and its mean value.
+    """
+    adata = _get_adata()
+    try:
+        cluster_id, mean_expr = find_top_expressing_cluster(adata, gene, groupby)
+
+        # Get cell count for context
+        df = calculate_cluster_averages(adata, gene, groupby)
+        top_row = df[df["cluster"] == cluster_id].iloc[0]
+        cell_count = int(top_row["cell_count"])
+
+        result = f"Cluster {cluster_id} has the highest expression of {gene}.\n"
+        result += f"Mean expression: {mean_expr:.2f}\n"
+        result += f"Cells in cluster: {cell_count:,}\n\n"
+        result += "Top 3 clusters:\n"
+        result += df.head(3).to_string(index=False)
+
+        return result
+    except ValueError as e:
+        return f"Error: {e}"
+    except Exception as e:
+        logger.exception("Find highest expression failed")
+        return f"Unexpected error: {e}"
+
+
+@tool
+def highlight_cluster(cluster_id: str, color_by: str = "leiden") -> str:
+    """Generate a UMAP plot highlighting a specific cluster.
+
+    Use this to visually emphasize a cluster of interest on the UMAP.
+
+    Args:
+        cluster_id: The cluster to highlight (e.g. '0', '3').
+        color_by: Observation key for coloring. Defaults to 'leiden'.
+
+    Returns:
+        UMAP plot with the specified cluster highlighted.
+    """
+    adata = _get_adata()
+    try:
+        if "X_umap" not in adata.obsm:
+            return "Error: UMAP not computed. Run preprocessing first."
+
+        if color_by not in adata.obs.columns:
+            return f"Error: '{color_by}' not found in observations."
+
+        # Get cell indices for the cluster
+        cell_indices = get_cluster_cell_indices(adata, cluster_id, color_by)
+
+        if len(cell_indices) == 0:
+            return f"Error: Cluster '{cluster_id}' not found in '{color_by}'."
+
+        # Create highlight mask
+        highlight = np.zeros(adata.n_obs, dtype=bool)
+        highlight[cell_indices] = True
+
+        # Generate plot
+        code = f'sc.pl.umap(adata, color="{color_by}", highlight=[cells_in_cluster_{cluster_id}])'
+        logger.info("Executing: %s", code)
+
+        # Plot with highlighting
+        _fig, ax = plt.subplots(figsize=(8, 6))
+
+        # Plot all cells in gray
+        umap_coords = adata.obsm["X_umap"]
+        ax.scatter(umap_coords[~highlight, 0], umap_coords[~highlight, 1],
+                  c='lightgray', s=1, alpha=0.5, label='Other cells')
+
+        # Plot highlighted cluster in red
+        ax.scatter(umap_coords[highlight, 0], umap_coords[highlight, 1],
+                  c='red', s=3, alpha=0.8, label=f'Cluster {cluster_id}')
+
+        ax.set_xlabel('UMAP 1')
+        ax.set_ylabel('UMAP 2')
+        ax.set_title(f'UMAP highlighting Cluster {cluster_id}')
+        ax.legend()
+
+        image = _figure_to_bytes()
+
+        message = f"UMAP plot highlighting cluster {cluster_id} ({len(cell_indices):,} cells)."
+        result = PlotResult(image=image, code=code, message=message)
+
+        return _store_and_return(result)
+
+    except ValueError as e:
+        return f"Error: {e}"
+    except Exception as e:
+        logger.exception("Highlight cluster failed")
+        return f"Unexpected error: {e}"
+
+
+@tool
+def rename_cluster(old_name: str, new_name: str, groupby: str = "leiden") -> str:
+    """Rename a cluster to annotate it with a cell type name.
+
+    Use this after identifying a cluster's cell type based on marker genes.
+    This modifies the dataset in-place.
+
+    Args:
+        old_name: Current cluster ID (e.g. '0', '3').
+        new_name: New name for the cluster (e.g. 'B cells', 'T cells').
+        groupby: Observation key for grouping. Defaults to 'leiden'.
+
+    Returns:
+        Confirmation message with the renamed cluster.
+    """
+    adata = _get_adata()
+    try:
+        # Verify cluster exists
+        if groupby not in adata.obs.columns:
+            return f"Error: '{groupby}' not found in observations."
+
+        clusters = adata.obs[groupby].astype(str).values
+        if old_name not in clusters:
+            available = ", ".join(sorted(set(clusters)))
+            return f"Error: Cluster '{old_name}' not found. Available: {available}"
+
+        # Count cells before rename
+        cell_count = np.sum(clusters == old_name)
+
+        # Perform rename
+        rename_cluster_labels(adata, old_name, new_name, groupby)
+
+        result = f"Successfully renamed cluster '{old_name}' to '{new_name}'.\n"
+        result += f"Affected {cell_count:,} cells in '{groupby}'.\n\n"
+        result += "Tip: Use umap_plot to visualize the updated labels."
+
+        return result
+
+    except ValueError as e:
+        return f"Error: {e}"
+    except Exception as e:
+        logger.exception("Rename cluster failed")
+        return f"Unexpected error: {e}"
+
+
+def get_analysis_tools() -> list:
+    """Return all analysis/reasoning tools."""
+    return [
+        calculate_average_expression,
+        find_highest_expression,
+        highlight_cluster,
+        rename_cluster,
+    ]

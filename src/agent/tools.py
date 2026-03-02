@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Callable
 
 from langchain_core.tools import tool
 
+from src.agent import analysis_tools
 from src.analysis.differential import get_de_dataframe, run_differential_expression
 from src.analysis.preprocessing import run_preprocessing
 from src.plotting.comparison import plot_dotplot, plot_heatmap, plot_scatter
@@ -33,6 +34,8 @@ def bind_dataset(adata: AnnData) -> None:
     """Bind a dataset so tools can access it."""
     global _adata  # noqa: PLW0603
     _adata = adata
+    # Also bind to analysis_tools module
+    analysis_tools._adata = adata
 
 
 def bind_dataset_state(state: DatasetState) -> None:
@@ -70,12 +73,16 @@ def _store_and_return(result: PlotResult) -> str:
 
 def get_plot_results() -> list[PlotResult]:
     """Retrieve all plot results from this turn (called by UI)."""
-    return list(_plot_results)
+    # Combine results from both modules
+    all_results = list(_plot_results)
+    all_results.extend(analysis_tools._plot_results)
+    return all_results
 
 
 def clear_plot_results() -> None:
     """Clear the plot result buffer."""
     _plot_results.clear()
+    analysis_tools._plot_results.clear()
 
 
 @tool
@@ -319,8 +326,12 @@ def differential_expression(groupby: str = "leiden", method: str = "wilcoxon") -
 def get_all_tools() -> list:
     """Return all tools for the agent."""
     return [
+        # Plotting tools
         umap_plot, violin_plot, dotplot, feature_plot,
         heatmap_plot, scatter_plot, volcano_plot_tool,
+        # Core tools
         dataset_info, check_data_status,
         preprocess_data, differential_expression,
+        # Analysis/reasoning tools
+        *analysis_tools.get_analysis_tools(),
     ]
