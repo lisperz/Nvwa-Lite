@@ -275,6 +275,8 @@ def preprocess_data(
 ) -> str:
     """Run the full preprocessing pipeline: QC → filter → normalize → HVG → PCA → UMAP → clustering.
 
+    IMPORTANT: Only use this on RAW count data. If data is already preprocessed, this will fail.
+
     Args:
         min_genes: Minimum genes per cell for filtering.
         min_cells: Minimum cells per gene for filtering.
@@ -284,6 +286,18 @@ def preprocess_data(
     """
     global _adata  # noqa: PLW0603
     adata = _get_adata()
+
+    # Check if data is already preprocessed
+    if _dataset_state is not None:
+        if _dataset_state.has_umap and _dataset_state.has_clustering:
+            return (
+                f"Error: Data is already preprocessed!\n\n"
+                f"Current state:\n{_dataset_state.summary()}\n\n"
+                f"The dataset already has UMAP coordinates and clustering ('{_dataset_state.cluster_key}').\n"
+                f"You can directly use visualization tools like umap_plot, violin_plot, etc.\n"
+                f"No need to preprocess again."
+            )
+
     try:
         new_adata, result = run_preprocessing(
             adata,
@@ -297,6 +311,10 @@ def preprocess_data(
         if _adata_replaced_callback:
             _adata_replaced_callback(new_adata)
         _update_state()
+        return result.message
+    except Exception as e:
+        logger.exception("Preprocessing failed")
+        return f"Preprocessing error: {e}"
         return result.message
     except Exception as e:
         logger.exception("Preprocessing failed")
