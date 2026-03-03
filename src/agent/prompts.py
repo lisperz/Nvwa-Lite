@@ -315,36 +315,11 @@ def build_system_prompt(
     sample_genes_list = list(all_genes[:10])
     uses_ensembl = any(g.startswith("ENS") for g in sample_genes_list)
 
-    # Try to detect tissue type and provide relevant marker knowledge
-    # Check for common marker genes across different tissue types
-    tissue_markers = {
-        "immune": ["CD3E", "CD3D", "MS4A1", "CD79A", "NKG7", "CST3", "LYZ",
-                   "GNLY", "FCER1A", "PPBP", "CD8A", "CD14", "FCGR3A", "CD4", "CD19"],
-        "brain": ["SLC17A7", "GAD1", "GAD2", "AQP4", "MBP", "OLIG1", "OLIG2",
-                  "GFAP", "SLC1A3", "PDGFRA", "TH", "DBH", "SLC6A3"],
-        "liver": ["ALB", "AFP", "CYP3A4", "HNF4A", "APOA1", "APOB"],
-        "kidney": ["NPHS1", "NPHS2", "SLC12A1", "SLC12A3", "AQP2"],
-        "heart": ["MYH6", "MYH7", "TNNT2", "TNNI3", "MYL2"],
-        "lung": ["SFTPC", "SFTPB", "SCGB1A1", "FOXJ1", "MUC5AC"],
-    }
-
-    detected_tissue = None
-    available_markers = []
-
-    for tissue, markers in tissue_markers.items():
-        found = [m for m in markers if m in gene_set]
-        if len(found) >= 3:  # If we find at least 3 markers, likely this tissue
-            detected_tissue = tissue
-            available_markers = found
-            break
-
-    # Build marker gene context
-    if available_markers:
-        marker_context = f"Detected tissue type: {detected_tissue}\nAvailable marker genes: {', '.join(available_markers[:15])}"
-    elif uses_ensembl:
+    # Build marker gene context based on gene ID format
+    if uses_ensembl:
         marker_context = "Dataset uses Ensembl gene IDs. Marker gene identification will require differential expression analysis."
     else:
-        marker_context = "No common marker genes detected. Use differential_expression to identify distinguishing genes for each cluster."
+        marker_context = "Use differential_expression to identify distinguishing genes for each cluster."
 
     sample_size = min(30, len(all_genes))
     sample_genes = ", ".join(all_genes[:sample_size])
