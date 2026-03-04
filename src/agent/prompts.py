@@ -36,7 +36,8 @@ Map user queries to these high-speed visualization workflows:
 - **"What's in my data?"** -> Check `{processing_state}`. If not preprocessed, run `preprocess_data`.
 - **"Show markers" / "What defines clusters?"** -> Run `differential_expression` -> `get_top_markers`.
 - **"Is gene X expressed?"** -> Call `feature_plot` and `violin_plot` simultaneously for a 360-degree view.
-- **"Quality control"** -> Call `calculate_mito_pct` followed by `violin_plot(genes="pct_counts_mt")`.
+- **"Quality control"** / **"Show QC metrics"** -> Use `violin_plot` with QC metric names from `{qc_metrics_map}` (e.g., `violin_plot(genes="pct_counts_mt,n_genes_by_counts,total_counts")`).
+  - **IMPORTANT**: `violin_plot` supports BOTH gene names AND QC metrics from adata.obs.columns. You can directly plot QC metrics without calling `calculate_mito_pct` if they already exist in the dataset.
 
 ## SCIENTIFIC INTERPRETATION (THE "CO-PILOT" BRAIN)
 After every plot, provide a 2-sentence "PI-level Insight":
@@ -148,21 +149,26 @@ def build_system_prompt(
             qc_metrics.append(f"Depth -> {key}")
     qc_metrics_map = ", ".join(qc_metrics) if qc_metrics else "No QC metrics detected"
 
-    # Enhanced processing state description
+    # Enhanced processing state description with hierarchical logic
     if dataset_state is not None:
         state_summary = dataset_state.summary()
 
-        # Add actionable guidance based on state
-        if not dataset_state.is_normalized:
-            processing_state = f"{state_summary}\n\n⚠️ DATA NOT PREPROCESSED - User will need preprocessing before visualization."
-        elif not dataset_state.has_umap:
-            processing_state = f"{state_summary}\n\n⚠️ NO UMAP - User will need preprocessing to visualize cells."
-        elif not dataset_state.has_clustering:
-            processing_state = f"{state_summary}\n\n⚠️ NO CLUSTERING - User will need preprocessing to group cells."
-        elif not dataset_state.has_de_results:
-            processing_state = f"{state_summary}\n\n✓ Ready for visualization. Suggest running differential_expression to identify cell types."
+        # Hierarchical state detection (following your specification)
+        if dataset_state.has_umap:
+            # X_umap exists -> ANALYSIS COMPLETE
+            if dataset_state.has_de_results:
+                processing_state = f"{state_summary}\n\n✓ ANALYSIS COMPLETE - Fully processed and ready for all analyses!"
+            else:
+                processing_state = f"{state_summary}\n\n✓ READY FOR ANALYSIS - UMAP and clustering complete. Suggest running differential_expression to identify cell types."
+        elif dataset_state.has_pca:
+            # Only X_pca exists -> PREPROCESSED (needs UMAP/clustering)
+            processing_state = f"{state_summary}\n\n⚠️ PREPROCESSED - PCA computed but UMAP/clustering needed for visualization."
+        elif dataset_state.has_clustering:
+            # Self-healing: Clustering labels exist -> Allow plotting even without full preprocessing
+            processing_state = f"{state_summary}\n\n✓ PARTIALLY READY - Clustering labels detected. You can attempt visualization even though full preprocessing markers are missing."
         else:
-            processing_state = f"{state_summary}\n\n✓ Fully processed and ready for all analyses!"
+            # Nothing detected -> RAW
+            processing_state = f"{state_summary}\n\n⚠️ RAW DATA - Needs full preprocessing (QC → normalization → UMAP → clustering) before visualization."
     else:
         processing_state = "Unknown — no state tracking available."
 

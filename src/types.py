@@ -58,7 +58,14 @@ def detect_dataset_state(
     source: str = "unknown",
     filename: str = "",
 ) -> DatasetState:
-    """Inspect an AnnData object and determine its processing state."""
+    """Inspect an AnnData object and determine its processing state.
+
+    Uses a hierarchical detection strategy:
+    1. Check for X_umap -> ANALYSIS COMPLETE (ready for all visualizations)
+    2. Check for X_pca -> PREPROCESSED (needs UMAP/clustering)
+    3. Check for clustering labels in obs -> PARTIALLY PREPROCESSED (can still plot)
+    4. Otherwise -> RAW (needs full preprocessing)
+    """
     state = DatasetState(
         source=source,
         filename=filename,
@@ -71,7 +78,7 @@ def detect_dataset_state(
     state.has_pca = "X_pca" in adata.obsm
     state.has_umap = "X_umap" in adata.obsm
 
-    # Detect clustering key
+    # Detect clustering key (self-healing logic)
     for key in ("leiden", "louvain"):
         if key in adata.obs.columns:
             state.has_clustering = True
@@ -79,4 +86,16 @@ def detect_dataset_state(
             break
 
     state.has_de_results = "rank_genes_groups" in adata.uns
+
+    # Self-healing: If clustering labels exist but is_normalized is False,
+    # assume the data is actually preprocessed (just missing log1p marker)
+    if state.has_clustering and not state.is_normalized:
+        # Check if data looks normalized (values in reasonable range)
+        import numpy as np
+        if hasattr(adata.X, 'max'):
+            max_val = adata.X.max() if hasattr(adata.X, 'max') else np.max(adata.X)
+            # If max value is < 20, likely log-normalized
+            if max_val < 20:
+                state.is_normalized = True
+
     return state

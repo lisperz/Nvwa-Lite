@@ -175,6 +175,7 @@ def plot_violin(
     Args:
         adata: The annotated data matrix.
         genes: Gene name(s) to plot. Can be a single gene or list of genes.
+               Also supports QC metrics from adata.obs (e.g., 'pct_counts_mt', 'n_genes_by_counts').
         groupby: Observation key to group cells by.
         title: Optional plot title.
 
@@ -187,8 +188,12 @@ def plot_violin(
     else:
         gene_list = genes
 
-    # Validate all genes
+    # Validate all genes - check both var_names and obs.columns for QC metrics
     for gene in gene_list:
+        # First check if it's a QC metric in obs.columns
+        if gene in adata.obs.columns:
+            continue  # Valid QC metric, skip gene validation
+        # Otherwise validate as a gene
         gene_err = validate_gene(adata, gene)
         if gene_err:
             raise ValueError(gene_err)
