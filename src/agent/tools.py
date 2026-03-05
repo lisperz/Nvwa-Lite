@@ -13,11 +13,11 @@ from langchain_core.tools import tool
 
 from src.agent import analysis_tools
 from src.analysis.calculations import calculate_mito_percentage
-from src.analysis.differential import get_de_dataframe, run_differential_expression
+from src.analysis.differential import get_de_dataframe, run_differential_expression, get_all_de_results
 from src.analysis.marker_genes import get_top_marker_genes_per_cluster
 from src.analysis.preprocessing import run_preprocessing
 from src.plotting.comparison import plot_dotplot, plot_heatmap, plot_scatter
-from src.plotting.executor import PlotResult, plot_feature, plot_umap, plot_violin
+from src.plotting.executor import PlotResult, TableResult, plot_feature, plot_umap, plot_violin
 from src.plotting.volcano import plot_volcano
 from src.types import DatasetState, detect_dataset_state
 
@@ -29,6 +29,7 @@ logger = logging.getLogger(__name__)
 _adata: AnnData | None = None
 _dataset_state: DatasetState | None = None
 _plot_results: list[PlotResult] = []
+_table_results: list[TableResult] = []
 _adata_replaced_callback: Callable[[AnnData], None] | None = None
 
 
@@ -88,6 +89,12 @@ def _store_and_return(result: PlotResult) -> str:
     return f"Plot generated successfully.\nCode: {result.code}\n{result.message}"
 
 
+def _store_table_and_return(result: TableResult) -> str:
+    """Append a TableResult to the buffer and return a text summary."""
+    _table_results.append(result)
+    return f"Table generated successfully.\nCode: {result.code}\n{result.message}"
+
+
 def get_plot_results() -> list[PlotResult]:
     """Retrieve all plot results from this turn (called by UI)."""
     # Combine results from both modules
@@ -96,10 +103,20 @@ def get_plot_results() -> list[PlotResult]:
     return all_results
 
 
+def get_table_results() -> list[TableResult]:
+    """Retrieve all table results from this turn (called by UI)."""
+    return list(_table_results)
+
+
 def clear_plot_results() -> None:
     """Clear the plot result buffer."""
     _plot_results.clear()
     analysis_tools._plot_results.clear()
+
+
+def clear_table_results() -> None:
+    """Clear the table result buffer."""
+    _table_results.clear()
 
 
 @tool
@@ -463,6 +480,106 @@ def calculate_mito_pct() -> str:
         return f"Error calculating mitochondrial percentage: {e}"
 
 
+@tool
+def get_de_results_table(groupby: str = "", top_n_per_cluster: int = 0) -> str:
+    """Generate a comprehensive differential expression results TABLE with full statistics.
+
+    USE THIS TOOL when users ask for:
+    - "show the differential expression table"
+    - "export DE results"
+    - "download differential expression results"
+    - "show DE statistics"
+    - "differential expression results table"
+
+    This generates a COMPLETE TABLE with ALL statistical information:
+    - cluster: cluster ID
+    - gene: gene name
+    - scores: statistical scores
+    - log2fc: log2 fold change (if available)
+    - pval: p-value (if available)
+    - pval_adj: adjusted p-value (if available)
+
+    The table will be displayed in the UI with a CSV download button.
+
+    Args:
+        groupby: The observation key for grouping. If empty, auto-detects clustering key.
+        top_n_per_cluster: If > 0, only return top N genes per cluster. If 0, return all genes.
+
+    Returns:
+        Summary message. The full table will be available for download in the UI.
+    """
+    adata = _get_adata()
+
+    # Auto-detect clustering key if not provided
+    if not groupby:
+        groupby = _get_cluster_key()
+
+    try:
+        # Get all DE results
+        df = get_all_de_results(adata)
+
+        # Filter to top N per cluster if requested
+        if top_n_per_cluster > 0:
+            df = df.groupby("cluster").head(top_n_per_cluster).reset_index(drop=True)
+
+        # Format the dataframe for display
+        df_display = df.copy()
+        if "log2fc" in df_display.columns:
+            df_display["log2fc"] = df_display["log2fc"].round(3)
+        if "pval" in df_display.columns:
+            df_display["pval"] = df_display["pval"].apply(lambda x: f"{x:.2e}")
+        if "pval_adj" in df_display.columns:
+            df_display["pval_adj"] = df_display["pval_adj"].apply(lambda x: f"{x:.2e}")
+        if "scores" in df_display.columns:
+            df_display["scores"] = df_display["scores"].round(3)
+
+        # Generate CSV data
+        csv_data = df.to_csv(index=False)
+
+        # Generate display representation (first 100 rows)
+        display_rows = min(100, len(df_display))
+        display_df = df_display.head(display_rows).to_markdown(index=False)
+
+        # Create code representation
+        code = f"""# Differential expression results for all clusters
+# Grouping by: {groupby}
+# Total genes: {len(df)}
+# Clusters: {df['cluster'].nunique()}
+
+import pandas as pd
+de_results = pd.read_csv('de_results.csv')
+print(de_results.head())
+"""
+
+        # Create message
+        n_clusters = df["cluster"].nunique()
+        columns_list = ", ".join(df.columns)
+        message = (
+            f"Differential expression results table generated.\n"
+            f"Grouping: {groupby}\n"
+            f"Clusters: {n_clusters}\n"
+            f"Total genes: {len(df)}\n"
+            f"{'Top ' + str(top_n_per_cluster) + ' genes per cluster' if top_n_per_cluster > 0 else 'All genes included'}\n\n"
+            f"Columns: {columns_list}\n"
+            f"The full table is available for download as CSV."
+        )
+
+        # Store the table result
+        table_result = TableResult(
+            csv_data=csv_data,
+            code=code,
+            message=message,
+            display_df=display_df
+        )
+        return _store_table_and_return(table_result)
+
+    except ValueError as e:
+        return f"Error: {e}"
+    except Exception as e:
+        logger.exception("Get DE results table failed")
+        return f"Unexpected error: {e}"
+
+
 def get_all_tools() -> list:
     """Return all tools for the agent."""
     return [
@@ -472,6 +589,8 @@ def get_all_tools() -> list:
         # Core tools
         dataset_info, check_data_status,
         preprocess_data, differential_expression, get_top_markers, calculate_mito_pct,
+        # Table tools
+        get_de_results_table,
         # Analysis/reasoning tools
         *analysis_tools.get_analysis_tools(),
     ]

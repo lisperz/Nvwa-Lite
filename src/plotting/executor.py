@@ -28,6 +28,16 @@ class PlotResult:
     message: str
 
 
+@dataclass
+class TableResult:
+    """Bundle of table output: CSV data, source code, and description."""
+
+    csv_data: str
+    code: str
+    message: str
+    display_df: str  # HTML or markdown representation for display
+
+
 def _figure_to_bytes() -> bytes:
     """Capture the current matplotlib figure as PNG bytes and close it."""
     buf = io.BytesIO()

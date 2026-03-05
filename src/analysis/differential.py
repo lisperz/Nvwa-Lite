@@ -80,3 +80,56 @@ def get_de_dataframe(adata: AnnData, group: str) -> pd.DataFrame:
         "pval": result["pvals"][group],
         "pval_adj": result["pvals_adj"][group],
     })
+
+
+def get_all_de_results(adata: AnnData) -> pd.DataFrame:
+    """Extract all DE results for all groups as a comprehensive DataFrame.
+
+    Returns DataFrame with columns: cluster, gene, and available statistics
+    (log2fc, pval, pval_adj, scores - depending on what's available).
+    """
+    if "rank_genes_groups" not in adata.uns:
+        raise ValueError("No DE results found. Run differential_expression first.")
+
+    result = adata.uns["rank_genes_groups"]
+    groups = list(result["names"].dtype.names)
+
+    # Check which fields are available
+    has_logfc = "logfoldchanges" in result
+    has_pval = "pvals" in result
+    has_pval_adj = "pvals_adj" in result
+    has_scores = "scores" in result
+
+    # Collect all results
+    all_results = []
+    for group in groups:
+        data = {
+            "cluster": group,
+            "gene": result["names"][group],
+        }
+
+        # Add optional fields if available
+        if has_scores:
+            data["scores"] = result["scores"][group]
+        if has_logfc:
+            data["log2fc"] = result["logfoldchanges"][group]
+        if has_pval:
+            data["pval"] = result["pvals"][group]
+        if has_pval_adj:
+            data["pval_adj"] = result["pvals_adj"][group]
+
+        df = pd.DataFrame(data)
+        all_results.append(df)
+
+    # Combine all groups
+    combined_df = pd.concat(all_results, ignore_index=True)
+
+    # Sort by cluster and then by best available metric
+    if has_pval_adj:
+        combined_df = combined_df.sort_values(["cluster", "pval_adj"])
+    elif has_scores:
+        combined_df = combined_df.sort_values(["cluster", "scores"], ascending=[True, False])
+    else:
+        combined_df = combined_df.sort_values("cluster")
+
+    return combined_df

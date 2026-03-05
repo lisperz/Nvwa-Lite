@@ -51,6 +51,11 @@ def create_agent(
 
     llm = ChatOpenAI(model=model, api_key=api_key, temperature=0)
     tools = get_all_tools()
+
+    # Log available tools for debugging
+    tool_names = [t.name for t in tools]
+    logger.info(f"Creating agent with {len(tools)} tools: {', '.join(tool_names)}")
+
     llm_with_tools = llm.bind_tools(tools)
     system_prompt = build_system_prompt(adata, dataset_state=dataset_state)
 

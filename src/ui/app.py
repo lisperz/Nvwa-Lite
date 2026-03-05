@@ -21,7 +21,7 @@ import anndata as ad
 import streamlit as st
 
 from src.agent.core import create_agent
-from src.agent.tools import clear_plot_results, get_plot_results, set_adata_replaced_callback
+from src.agent.tools import clear_plot_results, clear_table_results, get_plot_results, get_table_results, set_adata_replaced_callback
 from src.plotting.styles import configure_plot_style
 from src.types import DatasetState, detect_dataset_state
 from src.ui.components import (
@@ -132,7 +132,8 @@ def _clean_response_text(text: str) -> str:
 
 
 def _render_message(msg: dict) -> None:
-    """Render a single chat message (code blocks, images, text)."""
+    """Render a single chat message (code blocks, images, tables, text)."""
+    # Render plots
     plots = msg.get("plots", [])
     for i, plot in enumerate(plots):
         with st.expander(f"📝 Generated Code ({i + 1})", expanded=False):
@@ -145,12 +146,28 @@ def _render_message(msg: dict) -> None:
             mime="image/png",
             key=f"dl_{msg.get('idx', 0)}_{i}",
         )
+
+    # Render tables
+    tables = msg.get("tables", [])
+    for i, table in enumerate(tables):
+        with st.expander(f"📝 Generated Code ({i + 1})", expanded=False):
+            st.code(table["code"], language="python")
+        st.markdown(table["display_df"])
+        st.download_button(
+            label=f"📥 Download table {i + 1} (CSV)",
+            data=table["csv_data"],
+            file_name=f"nvwa_de_results_{msg.get('idx', 0)}_{i}.csv",
+            mime="text/csv",
+            key=f"dl_table_{msg.get('idx', 0)}_{i}",
+        )
+
     # Legacy single-plot support
     if not plots and msg.get("image"):
         if msg.get("code"):
             with st.expander("📝 Generated Code", expanded=False):
                 st.code(msg["code"], language="python")
         st.image(msg["image"], use_container_width=True)
+
     if msg.get("content"):
         st.markdown(msg["content"])
 
@@ -188,6 +205,7 @@ if prompt := st.chat_input("Ask about your data... (e.g., 'Show me the UMAP plot
     with st.chat_message("assistant"):
         with st.spinner("Analyzing your request..."):
             clear_plot_results()
+            clear_table_results()
             agent = create_agent(
                 adata=adata, api_key=api_key, dataset_state=ds_state,
             )
@@ -196,6 +214,7 @@ if prompt := st.chat_input("Ask about your data... (e.g., 'Show me the UMAP plot
                 chat_history=st.session_state.chat_history,
             )
             plot_results = get_plot_results()
+            table_results = get_table_results()
             clean_text = _clean_response_text(response.text)
 
             msg_idx = len(st.session_state.messages)
@@ -220,6 +239,26 @@ if prompt := st.chat_input("Ask about your data... (e.g., 'Show me the UMAP plot
                         key=f"dl_{msg_idx}_{i}",
                     )
                 msg_record["plots"] = plots_data
+
+            if table_results:
+                tables_data: list[dict] = []
+                for i, tr in enumerate(table_results):
+                    tables_data.append({
+                        "code": tr.code,
+                        "csv_data": tr.csv_data,
+                        "display_df": tr.display_df
+                    })
+                    with st.expander(f"���� Generated Code ({i + 1})", expanded=False):
+                        st.code(tr.code, language="python")
+                    st.markdown(tr.display_df)
+                    st.download_button(
+                        label=f"📥 Download table {i + 1} (CSV)",
+                        data=tr.csv_data,
+                        file_name=f"nvwa_de_results_{msg_idx}_{i}.csv",
+                        mime="text/csv",
+                        key=f"dl_table_{msg_idx}_{i}",
+                    )
+                msg_record["tables"] = tables_data
 
             st.markdown(clean_text)
 
