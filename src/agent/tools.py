@@ -538,7 +538,14 @@ def get_de_results_table(groupby: str = "", top_n_per_cluster: int = 0) -> str:
 
         # Generate display representation (first 100 rows)
         display_rows = min(100, len(df_display))
-        display_df = df_display.head(display_rows).to_markdown(index=False)
+        display_df_subset = df_display.head(display_rows)
+
+        # Convert to markdown with proper formatting
+        display_df = display_df_subset.to_markdown(index=False, tablefmt="pipe")
+
+        # Add summary info at the top
+        if len(df) > display_rows:
+            display_df = f"**Showing first {display_rows} of {len(df)} total rows**\n\n{display_df}"
 
         # Create code representation
         code = f"""# Differential expression results for all clusters

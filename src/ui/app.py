@@ -248,7 +248,7 @@ if prompt := st.chat_input("Ask about your data... (e.g., 'Show me the UMAP plot
                         "csv_data": tr.csv_data,
                         "display_df": tr.display_df
                     })
-                    with st.expander(f"���� Generated Code ({i + 1})", expanded=False):
+                    with st.expander(f"📝 Generated Code ({i + 1})", expanded=False):
                         st.code(tr.code, language="python")
                     st.markdown(tr.display_df)
                     st.download_button(
