@@ -13,7 +13,7 @@ from langchain_core.tools import tool
 
 from src.agent import analysis_tools
 from src.analysis.calculations import calculate_mito_percentage
-from src.analysis.differential import get_de_dataframe, run_differential_expression, get_all_de_results
+from src.analysis.differential import get_de_dataframe, run_differential_expression, run_pairwise_de, get_all_de_results
 from src.analysis.marker_genes import get_top_marker_genes_per_cluster
 from src.analysis.preprocessing import run_preprocessing
 from src.plotting.comparison import plot_dotplot, plot_heatmap, plot_scatter
@@ -378,11 +378,21 @@ def preprocess_data(
 
 @tool
 def differential_expression(groupby: str = "", method: str = "wilcoxon") -> str:
-    """Run differential expression analysis to find marker genes per cluster.
+    """Run marker gene analysis to find distinguishing genes for each cluster/cell type.
+
+    This performs one-vs-rest analysis for ALL groups (like Seurat's FindAllMarkers).
+    Use this when you want to identify what genes define each cell type/cluster.
+
+    IMPORTANT: This is NOT for comparing two specific groups. For pairwise comparisons
+    (e.g., "CD4 T cells vs CD8 T cells"), use compare_groups_de instead.
 
     Args:
         groupby: The observation key for grouping. If empty, auto-detects clustering key.
         method: Statistical method ('wilcoxon', 't-test', 'logreg').
+
+    Returns:
+        Summary message. Results are stored and can be accessed via get_top_markers
+        or get_de_results_table.
     """
     adata = _get_adata()
 
@@ -397,8 +407,64 @@ def differential_expression(groupby: str = "", method: str = "wilcoxon") -> str:
     except ValueError as e:
         return f"Error: {e}"
     except Exception as e:
-        logger.exception("DE analysis failed")
-        return f"DE error: {e}"
+        logger.exception("Marker gene analysis failed")
+        return f"Marker gene analysis error: {e}"
+
+
+@tool
+def compare_groups_de(
+    group1: str,
+    group2: str,
+    groupby: str = "",
+    method: str = "wilcoxon"
+) -> str:
+    """Run pairwise differential expression analysis between two specific groups.
+
+    This performs direct comparison between two cell types/clusters (like Seurat's
+    FindMarkers with ident.1 and ident.2). Use this when the user explicitly asks
+    to compare two specific groups.
+
+    Examples of when to use this:
+    - "Compare CD4 T cells vs CD8 T cells"
+    - "Find DEGs between cluster 0 and cluster 1"
+    - "What genes differ between B cells and T cells"
+
+    Args:
+        group1: First group identifier (e.g., "CD4 T cells", "0", "B cells").
+        group2: Second group identifier (e.g., "CD8 T cells", "1", "T cells").
+        groupby: The observation key for grouping. If empty, auto-detects clustering key.
+        method: Statistical method ('wilcoxon', 't-test', 'logreg').
+
+    Returns:
+        Summary message with comparison results. Positive log2FC means higher in group1,
+        negative log2FC means higher in group2.
+    """
+    adata = _get_adata()
+
+    # Auto-detect clustering key if not provided
+    if not groupby:
+        groupby = _get_cluster_key()
+
+    try:
+        result = run_pairwise_de(
+            adata,
+            group1=group1,
+            group2=group2,
+            groupby=groupby,
+            method=method
+        )
+        # Store results in uns for potential table export
+        adata.uns["pairwise_de_result"] = {
+            "group1": group1,
+            "group2": group2,
+            "results_df": result.results_df
+        }
+        return result.message
+    except ValueError as e:
+        return f"Error: {e}"
+    except Exception as e:
+        logger.exception("Pairwise DE analysis failed")
+        return f"Pairwise DE error: {e}"
 
 
 @tool
@@ -587,6 +653,108 @@ print(de_results.head())
         return f"Unexpected error: {e}"
 
 
+@tool
+def get_pairwise_de_table(top_n: int = 0, padj_threshold: float = 0.05) -> str:
+    """Generate a table for the most recent pairwise differential expression comparison.
+
+    USE THIS TOOL after running compare_groups_de when users want to see or export
+    the detailed results table.
+
+    Args:
+        top_n: If > 0, only return top N genes (sorted by adjusted p-value). If 0, return all.
+        padj_threshold: Only include genes with adjusted p-value below this threshold.
+
+    Returns:
+        Summary message. The full table will be available for download in the UI.
+    """
+    adata = _get_adata()
+
+    try:
+        # Check if pairwise DE results exist
+        if "pairwise_de_result" not in adata.uns:
+            return (
+                "Error: No pairwise DE results found. "
+                "Please run compare_groups_de first to compare two groups."
+            )
+
+        pairwise_result = adata.uns["pairwise_de_result"]
+        group1 = pairwise_result["group1"]
+        group2 = pairwise_result["group2"]
+        df = pairwise_result["results_df"].copy()
+
+        # Filter by adjusted p-value threshold
+        df = df[df["pval_adj"] < padj_threshold]
+
+        # Filter to top N if requested
+        if top_n > 0:
+            df = df.head(top_n)
+
+        if len(df) == 0:
+            return (
+                f"No genes found with adjusted p-value < {padj_threshold}. "
+                f"Try increasing the threshold or check if the comparison was successful."
+            )
+
+        # Format the dataframe for display
+        df_display = df.copy()
+        df_display["log2fc"] = df_display["log2fc"].round(3)
+        df_display["pval"] = df_display["pval"].apply(lambda x: f"{x:.2e}")
+        df_display["pval_adj"] = df_display["pval_adj"].apply(lambda x: f"{x:.2e}")
+
+        # Generate CSV data
+        csv_data = df.to_csv(index=False)
+
+        # Generate display representation (first 100 rows)
+        display_rows = min(100, len(df_display))
+        display_df_subset = df_display.head(display_rows)
+
+        # Convert to markdown with proper formatting
+        from tabulate import tabulate
+        display_df = tabulate(display_df_subset, headers="keys", tablefmt="pipe", showindex=False)
+
+        # Add summary info at the top
+        if len(df) > display_rows:
+            display_df = f"**Showing first {display_rows} of {len(df)} total rows**\n\n{display_df}"
+
+        # Create code representation
+        code = f"""# Pairwise differential expression: {group1} vs {group2}
+# Total significant genes (padj < {padj_threshold}): {len(df)}
+# Positive log2FC: higher in {group1}
+# Negative log2FC: higher in {group2}
+
+import pandas as pd
+de_results = pd.read_csv('pairwise_de_{group1}_vs_{group2}.csv')
+print(de_results.head())
+"""
+
+        # Create message
+        n_upregulated = (df["log2fc"] > 0).sum()
+        n_downregulated = (df["log2fc"] < 0).sum()
+        message = (
+            f"Pairwise DE results table: {group1} vs {group2}\n"
+            f"Significant genes (padj < {padj_threshold}): {len(df)}\n"
+            f"  - Higher in {group1}: {n_upregulated} genes\n"
+            f"  - Higher in {group2}: {n_downregulated} genes\n\n"
+            f"{'Top ' + str(top_n) + ' genes shown' if top_n > 0 else 'All significant genes included'}\n"
+            f"The full table is available for download as CSV."
+        )
+
+        # Store the table result
+        table_result = TableResult(
+            csv_data=csv_data,
+            code=code,
+            message=message,
+            display_df=display_df
+        )
+        return _store_table_and_return(table_result)
+
+    except ValueError as e:
+        return f"Error: {e}"
+    except Exception as e:
+        logger.exception("Get pairwise DE table failed")
+        return f"Unexpected error: {e}"
+
+
 def get_all_tools() -> list:
     """Return all tools for the agent."""
     return [
@@ -595,9 +763,9 @@ def get_all_tools() -> list:
         heatmap_plot, scatter_plot, volcano_plot_tool,
         # Core tools
         dataset_info, check_data_status,
-        preprocess_data, differential_expression, get_top_markers, calculate_mito_pct,
+        preprocess_data, differential_expression, compare_groups_de, get_top_markers, calculate_mito_pct,
         # Table tools
-        get_de_results_table,
+        get_de_results_table, get_pairwise_de_table,
         # Analysis/reasoning tools
         *analysis_tools.get_analysis_tools(),
     ]
