@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 def get_top_marker_genes_per_cluster(
     adata: AnnData,
-    n_genes: int = 10,
+    n_genes: int = 20,
     groupby: str = "leiden",
 ) -> list[str]:
     """Get top N marker genes for each cluster, removing duplicates.
@@ -56,7 +56,7 @@ def get_top_marker_genes_per_cluster(
 
 def get_top_marker_genes_overall(
     adata: AnnData,
-    n_genes: int = 10,
+    n_genes: int = 20,
 ) -> list[str]:
     """Get top N marker genes overall, ranked by significance across all clusters.
 
@@ -97,7 +97,7 @@ def get_top_marker_genes_overall(
 
 def get_top_marker_genes_per_cluster_exact(
     adata: AnnData,
-    n_genes: int = 10,
+    n_genes: int = 20,
     groupby: str = "leiden",
 ) -> dict[str, list[str]]:
     """Get exactly N marker genes for each cluster (may include duplicates across clusters).
