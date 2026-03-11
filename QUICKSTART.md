@@ -1,23 +1,36 @@
-# Quick Start - Local Testing
+# Quick Start - Local Testing with Real AWS
 
 ## Prerequisites
 - Docker Desktop installed and running
 - OpenAI API key
+- AWS credentials (for S3 testing)
 
-## Step 1: Setup Environment (2 minutes)
+## Step 1: Create Test S3 Bucket (2 minutes)
 
 ```bash
 cd nvwa-lite
 
+# Create test bucket (separate from production)
+./scripts/setup_s3.sh nvwa-test-data
+```
+
+## Step 2: Setup Environment (2 minutes)
+
+```bash
 # Copy environment template
 cp .env.local.example .env
 
-# Edit .env and add your OpenAI API key
+# Edit .env and add your credentials
 nano .env  # or use your preferred editor
-# Change: OPENAI_API_KEY=your-openai-key-here
+
+# Required changes:
+# 1. OPENAI_API_KEY=sk-your-real-key
+# 2. AWS_ACCESS_KEY_ID=your-key
+# 3. AWS_SECRET_ACCESS_KEY=your-secret
+# 4. S3_BUCKET_NAME=nvwa-test-data
 ```
 
-## Step 2: Start Services (3 minutes)
+## Step 3: Start Services (3 minutes)
 
 ```bash
 # Quick start script handles everything
@@ -47,6 +60,16 @@ This will:
 3. Verify response appears
 4. Check dashboard at http://localhost:8502
 5. Should see 1 active user, 1 session
+
+### Test S3 Integration (IMPORTANT!)
+```bash
+# Check that file was uploaded to S3
+aws s3 ls s3://nvwa-test-data/users/ --recursive
+
+# Should see: users/<user_id>/sessions/<session_id>/uploads/<filename>
+```
+
+This confirms real S3 integration works!
 
 ### Test Logging
 ```bash
@@ -78,8 +101,9 @@ docker-compose down
 
 ## If Everything Works
 
-✅ You're ready to set up test environment on AWS
-✅ Follow `docs/DEPLOYMENT_STRATEGY.md` for next steps
+✅ You're ready to deploy to production EC2
+✅ Follow `docs/SIMPLIFIED_DEPLOYMENT.md` for production deployment
+✅ No need for separate test EC2 - local testing with real S3 is sufficient
 
 ## If Issues Occur
 
