@@ -61,7 +61,9 @@ configure_plot_style()
 # ---------------------------------------------------------------------------
 
 # Initialize services
-auth_service = AuthService()
+# Load tokens from pilot_tokens.json file (fallback to env vars if file doesn't exist)
+tokens_file = Path("pilot_tokens.json")
+auth_service = AuthService(tokens_file=tokens_file if tokens_file.exists() else None)
 session_manager = SessionManager()
 
 # Check authentication
