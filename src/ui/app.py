@@ -280,9 +280,15 @@ if prompt := st.chat_input("Ask about your data... (e.g., 'Show me the UMAP plot
         st.markdown(prompt)
 
     with st.chat_message("assistant"):
-        with st.spinner("Analyzing your request..."):
+        # Create a placeholder for progressive updates
+        status_placeholder = st.empty()
+        status_placeholder.info("🤔 Thinking...")
+
+        try:
             clear_plot_results()
             clear_table_results()
+
+            status_placeholder.info("🔧 Initializing agent...")
             agent = create_agent(
                 adata=adata,
                 api_key=api_key,
@@ -290,10 +296,16 @@ if prompt := st.chat_input("Ask about your data... (e.g., 'Show me the UMAP plot
                 user_id=user.user_id,
                 session_id=st.session_state.session_id,
             )
+
+            status_placeholder.info("💬 Processing your request...")
             response = agent.invoke(
                 user_input=prompt,
                 chat_history=st.session_state.chat_history,
             )
+
+            # Clear status message
+            status_placeholder.empty()
+
             plot_results = get_plot_results()
             table_results = get_table_results()
             clean_text = _clean_response_text(response.text)
@@ -343,6 +355,17 @@ if prompt := st.chat_input("Ask about your data... (e.g., 'Show me the UMAP plot
 
             st.markdown(clean_text)
 
+        except Exception as e:
+            status_placeholder.empty()
+            st.error(f"An error occurred: {str(e)}")
+            logger.exception("Error processing user request")
+            msg_record = {
+                "role": "assistant",
+                "content": f"I encountered an error: {str(e)}",
+                "idx": len(st.session_state.messages),
+            }
+
     st.session_state.messages.append(msg_record)
     st.session_state.chat_history.append(("user", prompt))
-    st.session_state.chat_history.append(("assistant", clean_text))
+    if "clean_text" in locals():
+        st.session_state.chat_history.append(("assistant", clean_text))
