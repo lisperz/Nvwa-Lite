@@ -199,8 +199,7 @@ class AgentRunner:
                 user_id=self._user_id,
                 session_id=self._session_id,
                 input_tokens=0,  # Not easily extractable from aggregated usage
-                output_tokens=0,
-                total_tokens=total_tokens,
+                output_tokens=total_tokens,  # Use total as output for now
                 model=self._llm.model_name if hasattr(self._llm, "model_name") else "gpt-4o-mini"
             )
 
