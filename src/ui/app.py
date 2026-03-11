@@ -288,20 +288,20 @@ if prompt := st.chat_input("Ask about your data... (e.g., 'Show me the UMAP plot
         st.error("No active session. Please upload a dataset first.")
         st.stop()
 
+    # Add user message and update chat history
     st.session_state.messages.append({"role": "user", "content": prompt})
+    st.session_state.chat_history.append(("user", prompt))
+
+    # Display user message immediately
     with st.chat_message("user"):
         st.markdown(prompt)
 
-    with st.chat_message("assistant"):
-        # Create a placeholder for progressive updates
-        status_placeholder = st.empty()
-        status_placeholder.info("🤔 Thinking...")
-
+    # Use spinner to show processing state without causing shadow effect
+    with st.spinner("🤔 Thinking..."):
         try:
             clear_plot_results()
             clear_table_results()
 
-            status_placeholder.info("🔧 Initializing agent...")
             agent = create_agent(
                 adata=adata,
                 api_key=api_key,
@@ -310,14 +310,10 @@ if prompt := st.chat_input("Ask about your data... (e.g., 'Show me the UMAP plot
                 session_id=st.session_state.session_id,
             )
 
-            status_placeholder.info("💬 Processing your request...")
             response = agent.invoke(
                 user_input=prompt,
-                chat_history=st.session_state.chat_history,
+                chat_history=st.session_state.chat_history[:-1],
             )
-
-            # Clear status message
-            status_placeholder.empty()
 
             plot_results = get_plot_results()
             table_results = get_table_results()
@@ -330,20 +326,11 @@ if prompt := st.chat_input("Ask about your data... (e.g., 'Show me the UMAP plot
                 "idx": msg_idx,
             }
 
+            # Build message record with plots and tables
             if plot_results:
                 plots_data: list[dict] = []
                 for i, pr in enumerate(plot_results):
                     plots_data.append({"code": pr.code, "image": pr.image})
-                    with st.expander(f"📝 Generated Code ({i + 1})", expanded=False):
-                        st.code(pr.code, language="python")
-                    st.image(pr.image, use_container_width=True)
-                    st.download_button(
-                        label=f"Download plot {i + 1}",
-                        data=pr.image,
-                        file_name=f"nvwa_plot_{msg_idx}_{i}.png",
-                        mime="image/png",
-                        key=f"dl_{msg_idx}_{i}",
-                    )
                 msg_record["plots"] = plots_data
 
             if table_results:
@@ -354,31 +341,21 @@ if prompt := st.chat_input("Ask about your data... (e.g., 'Show me the UMAP plot
                         "csv_data": tr.csv_data,
                         "display_df": tr.display_df
                     })
-                    with st.expander(f"📝 Generated Code ({i + 1})", expanded=False):
-                        st.code(tr.code, language="python")
-                    st.markdown(tr.display_df)
-                    st.download_button(
-                        label=f"📥 Download table {i + 1} (CSV)",
-                        data=tr.csv_data,
-                        file_name=f"nvwa_de_results_{msg_idx}_{i}.csv",
-                        mime="text/csv",
-                        key=f"dl_table_{msg_idx}_{i}",
-                    )
                 msg_record["tables"] = tables_data
 
-            st.markdown(clean_text)
+            # Add to messages and chat history
+            st.session_state.messages.append(msg_record)
+            st.session_state.chat_history.append(("assistant", clean_text))
 
         except Exception as e:
-            status_placeholder.empty()
-            st.error(f"An error occurred: {str(e)}")
             logger.exception("Error processing user request")
             msg_record = {
                 "role": "assistant",
                 "content": f"I encountered an error: {str(e)}",
                 "idx": len(st.session_state.messages),
             }
+            st.session_state.messages.append(msg_record)
+            st.session_state.chat_history.append(("assistant", f"Error: {str(e)}"))
 
-    st.session_state.messages.append(msg_record)
-    st.session_state.chat_history.append(("user", prompt))
-    if "clean_text" in locals():
-        st.session_state.chat_history.append(("assistant", clean_text))
+    # Trigger rerun to display the new messages
+    st.rerun()
