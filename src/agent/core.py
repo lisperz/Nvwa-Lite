@@ -68,9 +68,9 @@ def create_agent(
     # Initialize event logger if user_id and session_id provided
     event_logger = None
     if user_id and session_id:
-        event_logger = EventLogger(user_id=user_id, session_id=session_id)
+        event_logger = EventLogger()
 
-    return AgentRunner(llm_with_tools, tools, system_prompt, event_logger)
+    return AgentRunner(llm_with_tools, tools, system_prompt, event_logger, user_id, session_id)
 
 
 class AgentRunner:
@@ -86,11 +86,15 @@ class AgentRunner:
         tools: list,
         system_prompt: str,
         event_logger: EventLogger | None = None,
+        user_id: str | None = None,
+        session_id: str | None = None,
     ) -> None:
         self._llm = llm_with_tools
         self._tools = {t.name: t for t in tools}
         self._system_prompt = system_prompt
         self._event_logger = event_logger
+        self._user_id = user_id
+        self._session_id = session_id
 
     def invoke(
         self,
@@ -99,10 +103,6 @@ class AgentRunner:
     ) -> AgentResponse:
         """Run the agent on a user query."""
         start_time = time.time()
-
-        # Log user message
-        if self._event_logger:
-            self._event_logger.log_user_message(user_input)
 
         messages = [SystemMessage(content=self._system_prompt)]
 
@@ -143,23 +143,20 @@ class AgentRunner:
 
                 if tool_fn is None:
                     result = f"Error: Unknown tool '{tool_name}'."
-                    if self._event_logger:
-                        self._event_logger.log_error(
-                            error_type="UnknownTool",
-                            error_message=result,
-                            context={"tool_name": tool_name}
-                        )
                 else:
                     try:
                         result = tool_fn.invoke(tool_args)
                         tool_duration = time.time() - tool_start
 
                         # Log successful tool execution
-                        if self._event_logger:
+                        if self._event_logger and self._user_id and self._session_id:
                             self._event_logger.log_tool_execution(
+                                user_id=self._user_id,
+                                session_id=self._session_id,
                                 tool_name=tool_name,
-                                parameters=tool_args,
-                                duration_ms=int(tool_duration * 1000),
+                                args=tool_args,
+                                result=str(result),
+                                duration_ms=tool_duration * 1000,
                                 status="success"
                             )
                     except Exception as e:
@@ -168,18 +165,15 @@ class AgentRunner:
                         tool_duration = time.time() - tool_start
 
                         # Log failed tool execution
-                        if self._event_logger:
+                        if self._event_logger and self._user_id and self._session_id:
                             self._event_logger.log_tool_execution(
+                                user_id=self._user_id,
+                                session_id=self._session_id,
                                 tool_name=tool_name,
-                                parameters=tool_args,
-                                duration_ms=int(tool_duration * 1000),
-                                status="error",
-                                error_message=str(e)
-                            )
-                            self._event_logger.log_error(
-                                error_type="ToolExecutionError",
-                                error_message=str(e),
-                                context={"tool_name": tool_name, "args": tool_args}
+                                args=tool_args,
+                                result=str(e),
+                                duration_ms=tool_duration * 1000,
+                                status="error"
                             )
 
                 messages.append(
@@ -189,13 +183,25 @@ class AgentRunner:
         final_text = response.content if response.content else ""
         response_time = time.time() - start_time
 
-        # Log token usage and response time
-        if self._event_logger and total_tokens > 0:
+        # Log user message with response time
+        if self._event_logger and self._user_id and self._session_id:
+            self._event_logger.log_user_message(
+                user_id=self._user_id,
+                session_id=self._session_id,
+                message=user_input,
+                response_time_ms=response_time * 1000,
+                tool_called=tool_called
+            )
+
+        # Log token usage
+        if self._event_logger and self._user_id and self._session_id and total_tokens > 0:
             self._event_logger.log_token_usage(
-                model=self._llm.model_name if hasattr(self._llm, "model_name") else "gpt-4o-mini",
-                prompt_tokens=0,  # Not easily extractable from aggregated usage
-                completion_tokens=0,
-                total_tokens=total_tokens
+                user_id=self._user_id,
+                session_id=self._session_id,
+                input_tokens=0,  # Not easily extractable from aggregated usage
+                output_tokens=0,
+                total_tokens=total_tokens,
+                model=self._llm.model_name if hasattr(self._llm, "model_name") else "gpt-4o-mini"
             )
 
         return AgentResponse(text=final_text, tool_called=tool_called)
