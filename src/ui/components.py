@@ -12,7 +12,7 @@ if TYPE_CHECKING:
     from src.types import DatasetState
 
 UPLOAD_DIR = Path("data/uploads")
-MAX_UPLOAD_MB = 500
+MAX_UPLOAD_MB = 2000
 
 
 def file_upload_widget() -> Path | None:
