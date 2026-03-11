@@ -60,11 +60,20 @@ configure_plot_style()
 # Authentication
 # ---------------------------------------------------------------------------
 
-# Initialize services
-# Load tokens from pilot_tokens.json file (fallback to env vars if file doesn't exist)
-tokens_file = Path("pilot_tokens.json")
-auth_service = AuthService(tokens_file=tokens_file if tokens_file.exists() else None)
-session_manager = SessionManager()
+# Initialize services (cached to avoid recreation on every rerun)
+@st.cache_resource
+def get_auth_service():
+    """Get cached authentication service."""
+    tokens_file = Path("pilot_tokens.json")
+    return AuthService(tokens_file=tokens_file if tokens_file.exists() else None)
+
+@st.cache_resource
+def get_session_manager():
+    """Get cached session manager."""
+    return SessionManager()
+
+auth_service = get_auth_service()
+session_manager = get_session_manager()
 
 # Check authentication
 if "user" not in st.session_state:
@@ -96,7 +105,11 @@ if "user" not in st.session_state:
 
 # User is authenticated
 user = st.session_state.user
-logger.info(f"Session active for user: {user.user_id}")
+
+# Log session info only once per session (not on every rerun)
+if "session_logged" not in st.session_state:
+    logger.info(f"Session active for user: {user.user_id}")
+    st.session_state.session_logged = True
 
 # ---------------------------------------------------------------------------
 # Sidebar
