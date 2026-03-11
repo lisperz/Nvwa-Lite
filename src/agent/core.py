@@ -7,6 +7,7 @@ and the structured plotting/analysis tools.
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -15,6 +16,7 @@ from langchain_openai import ChatOpenAI
 
 from src.agent.prompts import build_system_prompt
 from src.agent.tools import bind_dataset, bind_dataset_state, get_all_tools
+from src.logging.service import EventLogger
 
 if TYPE_CHECKING:
     from anndata import AnnData
@@ -36,6 +38,8 @@ def create_agent(
     api_key: str,
     model: str = "gpt-4o-mini",
     dataset_state: DatasetState | None = None,
+    user_id: str | None = None,
+    session_id: str | None = None,
 ):
     """Create a LangChain tool-calling agent bound to the dataset.
 
@@ -44,6 +48,8 @@ def create_agent(
         api_key: OpenAI API key.
         model: Model name to use.
         dataset_state: Optional processing state tracker.
+        user_id: User ID for logging.
+        session_id: Session ID for logging.
     """
     bind_dataset(adata)
     if dataset_state is not None:
@@ -59,7 +65,12 @@ def create_agent(
     llm_with_tools = llm.bind_tools(tools)
     system_prompt = build_system_prompt(adata, dataset_state=dataset_state)
 
-    return AgentRunner(llm_with_tools, tools, system_prompt)
+    # Initialize event logger if user_id and session_id provided
+    event_logger = None
+    if user_id and session_id:
+        event_logger = EventLogger(user_id=user_id, session_id=session_id)
+
+    return AgentRunner(llm_with_tools, tools, system_prompt, event_logger)
 
 
 class AgentRunner:
@@ -69,10 +80,17 @@ class AgentRunner:
     multiple sequential tool calls in a single turn.
     """
 
-    def __init__(self, llm_with_tools, tools: list, system_prompt: str) -> None:
+    def __init__(
+        self,
+        llm_with_tools,
+        tools: list,
+        system_prompt: str,
+        event_logger: EventLogger | None = None,
+    ) -> None:
         self._llm = llm_with_tools
         self._tools = {t.name: t for t in tools}
         self._system_prompt = system_prompt
+        self._event_logger = event_logger
 
     def invoke(
         self,
@@ -80,6 +98,12 @@ class AgentRunner:
         chat_history: list | None = None,
     ) -> AgentResponse:
         """Run the agent on a user query."""
+        start_time = time.time()
+
+        # Log user message
+        if self._event_logger:
+            self._event_logger.log_user_message(user_input)
+
         messages = [SystemMessage(content=self._system_prompt)]
 
         if chat_history:
@@ -93,10 +117,17 @@ class AgentRunner:
 
         tool_called = False
         max_iterations = 5
+        total_tokens = 0
 
         for _ in range(max_iterations):
             response = self._llm.invoke(messages)
             messages.append(response)
+
+            # Extract token usage if available
+            if hasattr(response, "response_metadata"):
+                usage = response.response_metadata.get("token_usage", {})
+                if usage:
+                    total_tokens += usage.get("total_tokens", 0)
 
             if not response.tool_calls:
                 break
@@ -107,19 +138,64 @@ class AgentRunner:
                 tool_args = tool_call["args"]
                 logger.info("Tool call: %s(%s)", tool_name, tool_args)
 
+                tool_start = time.time()
                 tool_fn = self._tools.get(tool_name)
+
                 if tool_fn is None:
                     result = f"Error: Unknown tool '{tool_name}'."
+                    if self._event_logger:
+                        self._event_logger.log_error(
+                            error_type="UnknownTool",
+                            error_message=result,
+                            context={"tool_name": tool_name}
+                        )
                 else:
                     try:
                         result = tool_fn.invoke(tool_args)
+                        tool_duration = time.time() - tool_start
+
+                        # Log successful tool execution
+                        if self._event_logger:
+                            self._event_logger.log_tool_execution(
+                                tool_name=tool_name,
+                                parameters=tool_args,
+                                duration_ms=int(tool_duration * 1000),
+                                status="success"
+                            )
                     except Exception as e:
                         logger.exception("Tool execution failed: %s", tool_name)
                         result = f"Error executing {tool_name}: {e}"
+                        tool_duration = time.time() - tool_start
+
+                        # Log failed tool execution
+                        if self._event_logger:
+                            self._event_logger.log_tool_execution(
+                                tool_name=tool_name,
+                                parameters=tool_args,
+                                duration_ms=int(tool_duration * 1000),
+                                status="error",
+                                error_message=str(e)
+                            )
+                            self._event_logger.log_error(
+                                error_type="ToolExecutionError",
+                                error_message=str(e),
+                                context={"tool_name": tool_name, "args": tool_args}
+                            )
 
                 messages.append(
                     ToolMessage(content=str(result), tool_call_id=tool_call["id"])
                 )
 
         final_text = response.content if response.content else ""
+        response_time = time.time() - start_time
+
+        # Log token usage and response time
+        if self._event_logger and total_tokens > 0:
+            self._event_logger.log_token_usage(
+                model=self._llm.model_name if hasattr(self._llm, "model_name") else "gpt-4o-mini",
+                prompt_tokens=0,  # Not easily extractable from aggregated usage
+                completion_tokens=0,
+                total_tokens=total_tokens
+            )
+
         return AgentResponse(text=final_text, tool_called=tool_called)

@@ -22,7 +22,9 @@ import streamlit as st
 
 from src.agent.core import create_agent
 from src.agent.tools import clear_plot_results, clear_table_results, get_plot_results, get_table_results, set_adata_replaced_callback
+from src.auth.service import AuthService
 from src.plotting.styles import configure_plot_style
+from src.session.manager import SessionManager
 from src.types import DatasetState, detect_dataset_state
 from src.ui.components import (
     dataset_info_panel,
@@ -55,11 +57,62 @@ st.set_page_config(page_title="Nvwa-Lite", page_icon="🧬", layout="wide")
 configure_plot_style()
 
 # ---------------------------------------------------------------------------
+# Authentication
+# ---------------------------------------------------------------------------
+
+# Initialize services
+auth_service = AuthService()
+session_manager = SessionManager()
+
+# Check authentication
+if "user" not in st.session_state:
+    st.title("🧬 Nvwa-Lite")
+    st.caption("Single-cell RNA-seq visualization powered by natural language.")
+
+    with st.form("auth_form"):
+        st.subheader("🔐 Authentication Required")
+        st.caption("Enter your pilot access token to continue.")
+        token_input = st.text_input("Access Token", type="password", help="Enter the token provided by your administrator")
+        submit = st.form_submit_button("Authenticate")
+
+        if submit:
+            if not token_input:
+                st.error("Please enter a token.")
+            else:
+                user = auth_service.validate_token(token_input)
+                if user:
+                    st.session_state.user = user
+                    st.session_state.token = token_input
+                    logger.info(f"User authenticated: {user.user_id}")
+                    st.success(f"Welcome, {user.email}!")
+                    st.rerun()
+                else:
+                    st.error("Invalid token. Please check your credentials and try again.")
+                    logger.warning(f"Failed authentication attempt with token: {token_input[:8]}...")
+
+    st.stop()
+
+# User is authenticated
+user = st.session_state.user
+logger.info(f"Session active for user: {user.user_id}")
+
+# ---------------------------------------------------------------------------
 # Sidebar
 # ---------------------------------------------------------------------------
 
 st.title("🧬 Nvwa-Lite")
 st.caption("Single-cell RNA-seq visualization powered by natural language.")
+
+with st.sidebar:
+    st.caption(f"👤 Logged in as: {user.email}")
+    if st.button("🚪 Logout"):
+        # Clean up session
+        if "session_id" in st.session_state:
+            session_manager.end_session(st.session_state.session_id)
+        # Clear session state
+        for key in list(st.session_state.keys()):
+            del st.session_state[key]
+        st.rerun()
 
 api_key = os.environ.get("OPENAI_API_KEY", "")
 uploaded_path = file_upload_widget()
@@ -95,11 +148,28 @@ if need_reload:
     adata = load_uploaded(str(uploaded_path))
     ds_state = detect_dataset_state(adata, source="upload", filename=uploaded_path.name)
 
+    # Create new session for this dataset
+    import uuid
+    session_id = str(uuid.uuid4())
+
+    # Try to create session (respects concurrency limits)
+    session = session_manager.create_session(
+        user_id=user.user_id,
+        session_id=session_id,
+        dataset_s3_key=f"users/{user.user_id}/sessions/{session_id}/uploads/{uploaded_path.name}"
+    )
+
+    if session is None:
+        st.error("Unable to create session. You may have an active session or the system is at capacity. Please try again later.")
+        st.stop()
+
     st.session_state.adata = adata
     st.session_state.ds_state = ds_state
     st.session_state._dataset_filename = current_filename
+    st.session_state.session_id = session_id
     st.session_state.messages = []
     st.session_state.chat_history = []
+    logger.info(f"New session created: {session_id} for user: {user.user_id}")
 
 # Use session state adata (may have been replaced by preprocessing)
 adata = st.session_state.adata
@@ -198,6 +268,11 @@ if not api_key:
     st.stop()
 
 if prompt := st.chat_input("Ask about your data... (e.g., 'Show me the UMAP plot')"):
+    # Ensure we have an active session
+    if "session_id" not in st.session_state:
+        st.error("No active session. Please upload a dataset first.")
+        st.stop()
+
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
@@ -207,7 +282,11 @@ if prompt := st.chat_input("Ask about your data... (e.g., 'Show me the UMAP plot
             clear_plot_results()
             clear_table_results()
             agent = create_agent(
-                adata=adata, api_key=api_key, dataset_state=ds_state,
+                adata=adata,
+                api_key=api_key,
+                dataset_state=ds_state,
+                user_id=user.user_id,
+                session_id=st.session_state.session_id,
             )
             response = agent.invoke(
                 user_input=prompt,

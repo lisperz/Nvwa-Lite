@@ -1,0 +1,315 @@
+"""Session management with concurrency control.
+
+Manages user sessions with Redis-backed state tracking and enforces
+concurrency limits (max 1 session per user, max 2 concurrent system-wide).
+"""
+
+from __future__ import annotations
+
+import json
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timedelta
+from enum import Enum
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    pass
+
+try:
+    import redis
+    REDIS_AVAILABLE = True
+except ImportError:
+    REDIS_AVAILABLE = False
+
+
+class SessionStatus(Enum):
+    """Session lifecycle states."""
+
+    ACTIVE = "active"
+    IDLE = "idle"
+    COMPLETED = "completed"
+    EXPIRED = "expired"
+
+
+@dataclass
+class Session:
+    """Represents a user analysis session."""
+
+    session_id: str
+    user_id: str
+    dataset_s3_key: str
+    status: SessionStatus
+    created_at: datetime
+    last_activity: datetime
+    message_count: int = 0
+    tool_calls: list[str] = field(default_factory=list)
+
+
+class SessionManager:
+    """Manage user sessions with concurrency control.
+
+    For the pilot, enforces:
+    - Max 1 active session per user
+    - Max 2 concurrent sessions system-wide
+    - 30-minute session timeout (auto-cleanup)
+    """
+
+    def __init__(
+        self,
+        redis_client: redis.Redis | None = None,
+        max_concurrent_sessions: int = 2,
+        session_timeout_minutes: int = 30,
+    ):
+        """Initialize the session manager.
+
+        Args:
+            redis_client: Redis client for state storage. If None, uses in-memory fallback.
+            max_concurrent_sessions: Maximum concurrent sessions (default 2).
+            session_timeout_minutes: Session timeout in minutes (default 30).
+        """
+        if redis_client is None and REDIS_AVAILABLE:
+            # Try to connect to local Redis
+            try:
+                redis_client = redis.Redis(
+                    host="localhost",
+                    port=6379,
+                    decode_responses=True,
+                )
+                redis_client.ping()  # Test connection
+            except (redis.ConnectionError, redis.TimeoutError):
+                redis_client = None
+
+        self.redis = redis_client
+        self.max_concurrent_sessions = max_concurrent_sessions
+        self.session_timeout_minutes = session_timeout_minutes
+
+        # Fallback in-memory storage if Redis unavailable
+        if self.redis is None:
+            self._memory_sessions: dict[str, dict] = {}
+            self._memory_user_sessions: dict[str, set[str]] = {}
+            self._memory_active_count = 0
+
+    def create_session(
+        self,
+        user_id: str,
+        session_id: str,
+        dataset_s3_key: str,
+    ) -> Session | None:
+        """Create a new session if concurrency limits allow.
+
+        Args:
+            user_id: User identifier.
+            session_id: Session identifier.
+            dataset_s3_key: S3 key of the uploaded dataset.
+
+        Returns:
+            Session object if created, None if limits exceeded.
+        """
+        # Check user's active sessions
+        if self._has_active_session(user_id):
+            return None  # User already has an active session
+
+        # Check system-wide concurrency
+        active_count = self._get_active_count()
+        if active_count >= self.max_concurrent_sessions:
+            return None  # System at capacity
+
+        # Create session
+        session = Session(
+            session_id=session_id,
+            user_id=user_id,
+            dataset_s3_key=dataset_s3_key,
+            status=SessionStatus.ACTIVE,
+            created_at=datetime.utcnow(),
+            last_activity=datetime.utcnow(),
+        )
+
+        self._store_session(session)
+        self._increment_active_count()
+
+        return session
+
+    def get_session(self, session_id: str) -> Session | None:
+        """Get session by ID.
+
+        Args:
+            session_id: Session identifier.
+
+        Returns:
+            Session object if found, None otherwise.
+        """
+        if self.redis:
+            session_key = f"session:{session_id}"
+            data = self.redis.hgetall(session_key)
+            if not data:
+                return None
+
+            return Session(
+                session_id=session_id,
+                user_id=data["user_id"],
+                dataset_s3_key=data["dataset_s3_key"],
+                status=SessionStatus(data["status"]),
+                created_at=datetime.fromisoformat(data["created_at"]),
+                last_activity=datetime.fromisoformat(data["last_activity"]),
+                message_count=int(data.get("message_count", 0)),
+                tool_calls=json.loads(data.get("tool_calls", "[]")),
+            )
+        else:
+            data = self._memory_sessions.get(session_id)
+            if not data:
+                return None
+
+            return Session(
+                session_id=session_id,
+                user_id=data["user_id"],
+                dataset_s3_key=data["dataset_s3_key"],
+                status=SessionStatus(data["status"]),
+                created_at=datetime.fromisoformat(data["created_at"]),
+                last_activity=datetime.fromisoformat(data["last_activity"]),
+                message_count=data.get("message_count", 0),
+                tool_calls=data.get("tool_calls", []),
+            )
+
+    def update_activity(self, session_id: str, tool_name: str | None = None) -> None:
+        """Update session activity timestamp.
+
+        Args:
+            session_id: Session identifier.
+            tool_name: Optional tool name to record.
+        """
+        if self.redis:
+            session_key = f"session:{session_id}"
+            self.redis.hset(session_key, "last_activity", datetime.utcnow().isoformat())
+            self.redis.hincrby(session_key, "message_count", 1)
+
+            if tool_name:
+                tool_calls = json.loads(self.redis.hget(session_key, "tool_calls") or "[]")
+                tool_calls.append(tool_name)
+                self.redis.hset(session_key, "tool_calls", json.dumps(tool_calls))
+
+            # Refresh expiration
+            self.redis.expire(session_key, self.session_timeout_minutes * 60)
+        else:
+            if session_id in self._memory_sessions:
+                self._memory_sessions[session_id]["last_activity"] = datetime.utcnow().isoformat()
+                self._memory_sessions[session_id]["message_count"] += 1
+
+                if tool_name:
+                    self._memory_sessions[session_id]["tool_calls"].append(tool_name)
+
+    def end_session(self, session_id: str) -> None:
+        """End a session and free up resources.
+
+        Args:
+            session_id: Session identifier.
+        """
+        session = self.get_session(session_id)
+        if not session:
+            return
+
+        if self.redis:
+            session_key = f"session:{session_id}"
+            user_sessions_key = f"user:{session.user_id}:sessions"
+
+            # Remove from user's sessions
+            self.redis.srem(user_sessions_key, session_id)
+
+            # Mark as completed
+            self.redis.hset(session_key, "status", SessionStatus.COMPLETED.value)
+
+            # Keep for 24 hours for analytics
+            self.redis.expire(session_key, 86400)
+        else:
+            if session_id in self._memory_sessions:
+                self._memory_sessions[session_id]["status"] = SessionStatus.COMPLETED.value
+                user_id = self._memory_sessions[session_id]["user_id"]
+                if user_id in self._memory_user_sessions:
+                    self._memory_user_sessions[user_id].discard(session_id)
+
+        self._decrement_active_count()
+
+    def get_queue_position(self, user_id: str) -> int | None:
+        """Get user's position in the queue (if waiting).
+
+        Args:
+            user_id: User identifier.
+
+        Returns:
+            Queue position (1-indexed) or None if not queued.
+        """
+        # For Phase 1, we don't implement a queue - just return None
+        # Phase 2 will add proper job queue with positions
+        return None
+
+    def _has_active_session(self, user_id: str) -> bool:
+        """Check if user has an active session."""
+        if self.redis:
+            user_sessions_key = f"user:{user_id}:sessions"
+            active_sessions = self.redis.smembers(user_sessions_key)
+            return len(active_sessions) > 0
+        else:
+            return user_id in self._memory_user_sessions and len(self._memory_user_sessions[user_id]) > 0
+
+    def _get_active_count(self) -> int:
+        """Get current number of active sessions."""
+        if self.redis:
+            count = self.redis.get("active_sessions_count")
+            return int(count) if count else 0
+        else:
+            return self._memory_active_count
+
+    def _store_session(self, session: Session) -> None:
+        """Store session in Redis or memory."""
+        if self.redis:
+            session_key = f"session:{session.session_id}"
+            user_sessions_key = f"user:{session.user_id}:sessions"
+
+            self.redis.hset(
+                session_key,
+                mapping={
+                    "user_id": session.user_id,
+                    "dataset_s3_key": session.dataset_s3_key,
+                    "status": session.status.value,
+                    "created_at": session.created_at.isoformat(),
+                    "last_activity": session.last_activity.isoformat(),
+                    "message_count": session.message_count,
+                    "tool_calls": json.dumps(session.tool_calls),
+                },
+            )
+
+            # Add to user's sessions
+            self.redis.sadd(user_sessions_key, session.session_id)
+
+            # Set expiration
+            self.redis.expire(session_key, self.session_timeout_minutes * 60)
+        else:
+            self._memory_sessions[session.session_id] = {
+                "user_id": session.user_id,
+                "dataset_s3_key": session.dataset_s3_key,
+                "status": session.status.value,
+                "created_at": session.created_at.isoformat(),
+                "last_activity": session.last_activity.isoformat(),
+                "message_count": session.message_count,
+                "tool_calls": session.tool_calls,
+            }
+
+            if session.user_id not in self._memory_user_sessions:
+                self._memory_user_sessions[session.user_id] = set()
+            self._memory_user_sessions[session.user_id].add(session.session_id)
+
+    def _increment_active_count(self) -> None:
+        """Increment active session count."""
+        if self.redis:
+            self.redis.incr("active_sessions_count")
+        else:
+            self._memory_active_count += 1
+
+    def _decrement_active_count(self) -> None:
+        """Decrement active session count."""
+        if self.redis:
+            count = self.redis.decr("active_sessions_count")
+            # Ensure it doesn't go negative
+            if count < 0:
+                self.redis.set("active_sessions_count", 0)
+        else:
+            self._memory_active_count = max(0, self._memory_active_count - 1)
