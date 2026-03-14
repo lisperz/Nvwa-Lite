@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Callable
 
+import pandas as pd
 from langchain_core.tools import tool
 
 from src.agent import analysis_tools
@@ -16,6 +17,7 @@ from src.analysis.calculations import calculate_mito_percentage, get_metadata_su
 from src.analysis.differential import get_de_dataframe, run_differential_expression, run_pairwise_de, get_all_de_results
 from src.analysis.marker_genes import get_top_marker_genes_per_cluster
 from src.analysis.preprocessing import run_preprocessing
+from src.analysis.qc_metrics import get_obs_column_statistics, resolve_qc_metric_column, summarize_qc_metrics
 from src.plotting.comparison import plot_dotplot, plot_heatmap, plot_scatter
 from src.plotting.executor import PlotResult, TableResult, plot_feature, plot_umap, plot_violin
 from src.plotting.volcano import plot_volcano
@@ -437,13 +439,20 @@ def preprocess_data(
 
 @tool
 def differential_expression(groupby: str = "", method: str = "wilcoxon") -> str:
-    """Run marker gene analysis to find distinguishing genes for each cluster/cell type.
+    """Run marker gene analysis to find distinguishing genes for ALL clusters/cell types.
 
     This performs one-vs-rest analysis for ALL groups (like Seurat's FindAllMarkers).
     Use this when you want to identify what genes define each cell type/cluster.
 
-    IMPORTANT: This is NOT for comparing two specific groups. For pairwise comparisons
-    (e.g., "CD4 T cells vs CD8 T cells"), use compare_groups_de instead.
+    IMPORTANT - When to use this tool:
+    - "Find marker genes for all clusters"
+    - "Full analysis report for all clusters"
+    - "Differential expression for the entire dataset"
+    - "What genes distinguish each cluster?"
+
+    IMPORTANT - When NOT to use this tool:
+    - For ONE specific cluster: use get_cluster_degs instead
+    - For comparing TWO clusters: use compare_groups_de instead
 
     Args:
         groupby: The observation key for grouping. If empty, auto-detects clustering key.
@@ -460,7 +469,7 @@ def differential_expression(groupby: str = "", method: str = "wilcoxon") -> str:
         groupby = _get_cluster_key()
 
     try:
-        result = run_differential_expression(adata, groupby=groupby, method=method)
+        result = run_differential_expression(adata, groupby=groupby, method=method, target_group=None)
         _update_state()
         return result.message
     except ValueError as e:
@@ -468,6 +477,68 @@ def differential_expression(groupby: str = "", method: str = "wilcoxon") -> str:
     except Exception as e:
         logger.exception("Marker gene analysis failed")
         return f"Marker gene analysis error: {e}"
+
+
+@tool
+def get_cluster_degs(
+    cluster: str,
+    groupby: str = "",
+    method: str = "wilcoxon"
+) -> str:
+    """Get differentially expressed genes for ONE specific cluster (one-vs-rest).
+
+    This performs one-vs-rest analysis for a SINGLE cluster/group, identifying genes
+    that distinguish this cluster from all other clusters combined.
+
+    IMPORTANT - When to use this tool:
+    - "DEGs for Cluster 3"
+    - "Marker genes for Cluster 4"
+    - "What genes define B cells?"
+    - "Differentially expressed genes for CD4 T cells"
+    - "Full analysis report for cluster 6"
+
+    IMPORTANT - When NOT to use this tool:
+    - For ALL clusters: use differential_expression instead
+    - For comparing TWO clusters: use compare_groups_de instead
+
+    Args:
+        cluster: The cluster/group identifier (e.g., "3", "Cluster 4", "B cells", "CD4 T cells").
+        groupby: Optional observation key for grouping. Leave empty for auto-detection.
+        method: Statistical method ('wilcoxon', 't-test', 'logreg').
+
+    Returns:
+        Summary message with DEG results. Results are stored and can be accessed
+        via get_de_results_table.
+    """
+    from src.analysis.cluster_resolution import resolve_analysis_scope
+
+    adata = _get_adata()
+
+    # Auto-detect clustering key if not provided
+    if not groupby:
+        groupby = _get_cluster_key()
+
+    try:
+        # Resolve the cluster identifier
+        resolved_cluster, resolved_groupby = resolve_analysis_scope(adata, cluster, groupby)
+
+        if resolved_cluster is None:
+            return "Error: Cluster identifier resolved to 'all clusters'. Use differential_expression for all clusters."
+
+        # Run one-vs-rest DE for this specific cluster
+        result = run_differential_expression(
+            adata,
+            groupby=resolved_groupby,
+            method=method,
+            target_group=resolved_cluster
+        )
+        _update_state()
+        return result.message
+    except ValueError as e:
+        return f"Error: {e}"
+    except Exception as e:
+        logger.exception("Cluster DEG analysis failed")
+        return f"Cluster DEG analysis error: {e}"
 
 
 @tool
@@ -483,15 +554,22 @@ def compare_groups_de(
     FindMarkers with ident.1 and ident.2). Use this when the user explicitly asks
     to compare two specific groups.
 
+    IMPORTANT - Intelligent Cluster Resolution:
+    This tool automatically handles BOTH numeric cluster IDs and cell type annotations:
+    - Numeric IDs: "0", "1", "Cluster 2", "cluster_5" -> resolves to cluster column
+    - Cell types: "CD4 T cells", "B cells" -> resolves to annotation column
+    - You do NOT need to specify groupby - it auto-detects the correct column
+
     Examples of when to use this:
     - "Compare CD4 T cells vs CD8 T cells"
     - "Find DEGs between cluster 0 and cluster 1"
+    - "Compare Cluster 1 vs Cluster 5"
     - "What genes differ between B cells and T cells"
 
     Args:
-        group1: First group identifier (e.g., "CD4 T cells", "0", "B cells").
-        group2: Second group identifier (e.g., "CD8 T cells", "1", "T cells").
-        groupby: The observation key for grouping. If empty, auto-detects clustering key.
+        group1: First group identifier (e.g., "CD4 T cells", "0", "Cluster 1").
+        group2: Second group identifier (e.g., "CD8 T cells", "1", "Cluster 5").
+        groupby: Optional observation key for grouping. Leave empty for auto-detection.
         method: Statistical method ('wilcoxon', 't-test', 'logreg').
 
     Returns:
@@ -500,16 +578,15 @@ def compare_groups_de(
     """
     adata = _get_adata()
 
-    # Auto-detect clustering key if not provided
-    if not groupby:
-        groupby = _get_cluster_key()
+    # Pass groupby as None if empty string (for auto-detection)
+    groupby_param = groupby if groupby else None
 
     try:
         result = run_pairwise_de(
             adata,
             group1=group1,
             group2=group2,
-            groupby=groupby,
+            groupby=groupby_param,
             method=method
         )
         # Store results in uns for potential table export
@@ -606,7 +683,131 @@ def calculate_mito_pct() -> str:
 
 
 @tool
-def get_de_results_table(groupby: str = "", top_n_per_cluster: int = 0) -> str:
+def summarize_obs_column(column_name: str) -> str:
+    """Compute descriptive statistics for a numeric column in adata.obs.
+
+    Use this tool when users ask for summaries of QC metrics or cell-level metadata,
+    such as:
+    - "Summarize total counts"
+    - "What's the median gene count per cell?"
+    - "Show statistics for n_genes_by_counts"
+    - "Describe the UMI distribution"
+
+    This tool handles common naming variations automatically:
+    - total_counts, n_counts, nCount_RNA (for UMI/read depth)
+    - n_genes_by_counts, n_genes, nFeature_RNA (for gene complexity)
+    - pct_counts_mt, percent.mt (for mitochondrial percentage)
+
+    Args:
+        column_name: The column name or metric name to summarize.
+                    Can be the exact column name or a common alias.
+
+    Returns:
+        Formatted summary with descriptive statistics:
+        - Number of cells (non-missing values)
+        - Mean, median, standard deviation
+        - Min, max, 25th and 75th percentiles
+    """
+    adata = _get_adata()
+
+    try:
+        # Try to resolve the column name
+        resolved_col = resolve_qc_metric_column(adata, column_name)
+
+        if resolved_col is None:
+            # Column not found, provide helpful error
+            numeric_cols = [
+                col for col in adata.obs.columns
+                if pd.api.types.is_numeric_dtype(adata.obs[col])
+            ]
+            return (
+                f"Error: Could not find column '{column_name}' in adata.obs.\n\n"
+                f"Available numeric columns:\n" + "\n".join(f"  - {col}" for col in numeric_cols)
+            )
+
+        # Compute statistics
+        stats = get_obs_column_statistics(adata, resolved_col)
+
+        # Format output
+        result = f"Summary statistics for '{resolved_col}':\n\n"
+
+        if resolved_col != column_name:
+            result += f"(Resolved from '{column_name}')\n\n"
+
+        result += f"Cells (non-missing): {stats['n_cells']:,}\n"
+        if stats['n_missing'] > 0:
+            result += f"Missing values: {stats['n_missing']:,}\n"
+
+        result += f"\nDescriptive Statistics:\n"
+        result += f"  Mean:   {stats['mean']:.2f}\n"
+        result += f"  Median: {stats['median']:.2f}\n"
+        result += f"  Std:    {stats['std']:.2f}\n"
+        result += f"  Min:    {stats['min']:.2f}\n"
+        result += f"  25%:    {stats['q25']:.2f}\n"
+        result += f"  75%:    {stats['q75']:.2f}\n"
+        result += f"  Max:    {stats['max']:.2f}\n"
+
+        return result
+
+    except ValueError as e:
+        return f"Error: {e}"
+    except Exception as e:
+        logger.exception("Summarize obs column failed")
+        return f"Unexpected error: {e}"
+
+
+@tool
+def summarize_qc_metrics_tool() -> str:
+    """Summarize all common QC metrics in the dataset.
+
+    Use this tool when users ask for:
+    - "Show QC summary"
+    - "Summarize quality control metrics"
+    - "What are the QC statistics?"
+    - "Show me total counts and gene counts"
+
+    Automatically detects and summarizes common QC metrics:
+    - Total counts / UMI depth (total_counts, n_counts, nCount_RNA)
+    - Number of genes expressed (n_genes_by_counts, n_genes, nFeature_RNA)
+    - Mitochondrial percentage (pct_counts_mt, percent.mt)
+
+    Returns:
+        Formatted table with statistics for all detected QC metrics.
+    """
+    adata = _get_adata()
+
+    try:
+        df = summarize_qc_metrics(adata)
+
+        # Format as a readable table
+        result = f"QC Metrics Summary ({adata.n_obs:,} cells):\n\n"
+
+        for _, row in df.iterrows():
+            metric = row["metric"]
+            result += f"Metric: {metric}\n"
+            result += f"  Cells:  {row['n_cells']:,}\n"
+            result += f"  Mean:   {row['mean']:.2f}\n"
+            result += f"  Median: {row['median']:.2f}\n"
+            result += f"  Std:    {row['std']:.2f}\n"
+            result += f"  Range:  {row['min']:.2f} - {row['max']:.2f}\n"
+            result += f"  IQR:    {row['q25']:.2f} - {row['q75']:.2f}\n"
+            result += "\n"
+
+        return result.strip()
+
+    except ValueError as e:
+        return f"Error: {e}"
+    except Exception as e:
+        logger.exception("Summarize QC metrics failed")
+        return f"Unexpected error: {e}"
+
+
+@tool
+def get_de_results_table(
+    groupby: str = "",
+    top_n_per_cluster: int = 0,
+    target_cluster: str = ""
+) -> str:
     """Generate a comprehensive differential expression results TABLE with full statistics.
 
     USE THIS TOOL when users ask for:
@@ -615,6 +816,8 @@ def get_de_results_table(groupby: str = "", top_n_per_cluster: int = 0) -> str:
     - "download differential expression results"
     - "show DE statistics"
     - "differential expression results table"
+    - "full analysis report for cluster X"
+    - "marker table for all clusters"
 
     This generates a COMPLETE TABLE with ALL statistical information:
     - cluster: cluster ID
@@ -626,13 +829,20 @@ def get_de_results_table(groupby: str = "", top_n_per_cluster: int = 0) -> str:
 
     The table will be displayed in the UI with a CSV download button.
 
+    IMPORTANT - Scope Handling:
+    - If target_cluster is empty: exports ALL clusters
+    - If target_cluster is specified: exports ONLY that cluster
+
     Args:
         groupby: The observation key for grouping. If empty, auto-detects clustering key.
         top_n_per_cluster: If > 0, only return top N genes per cluster. If 0, return all genes.
+        target_cluster: If specified, only export this cluster. If empty, export all clusters.
 
     Returns:
         Summary message. The full table will be available for download in the UI.
     """
+    from src.analysis.cluster_resolution import resolve_analysis_scope
+
     adata = _get_adata()
 
     # Auto-detect clustering key if not provided
@@ -640,8 +850,23 @@ def get_de_results_table(groupby: str = "", top_n_per_cluster: int = 0) -> str:
         groupby = _get_cluster_key()
 
     try:
+        # Resolve target cluster if specified
+        resolved_target = None
+        if target_cluster:
+            resolved_target, groupby = resolve_analysis_scope(adata, target_cluster, groupby)
+
         # Get all DE results
         df = get_all_de_results(adata)
+
+        # Filter to specific cluster if requested
+        if resolved_target is not None:
+            df = df[df["cluster"] == resolved_target].copy()
+            if len(df) == 0:
+                return (
+                    f"Error: No DE results found for cluster '{target_cluster}' "
+                    f"(resolved to '{resolved_target}'). "
+                    f"Please run get_cluster_degs first."
+                )
 
         # Filter to top N per cluster if requested
         if top_n_per_cluster > 0:
@@ -673,7 +898,8 @@ def get_de_results_table(groupby: str = "", top_n_per_cluster: int = 0) -> str:
             display_df = f"**Showing first {display_rows} of {len(df)} total rows**\n\n{display_df}"
 
         # Create code representation
-        code = f"""# Differential expression results for all clusters
+        scope_desc = f"cluster {target_cluster}" if target_cluster else "all clusters"
+        code = f"""# Differential expression results for {scope_desc}
 # Grouping by: {groupby}
 # Total genes: {len(df)}
 # Clusters: {df['cluster'].nunique()}
@@ -685,16 +911,30 @@ print(de_results.head())
 
         # Create message
         n_clusters = df["cluster"].nunique()
+        cluster_names = sorted(df["cluster"].unique())
         columns_list = ", ".join(df.columns)
-        message = (
-            f"Differential expression results table generated.\n"
-            f"Grouping: {groupby}\n"
-            f"Clusters: {n_clusters}\n"
-            f"Total genes: {len(df)}\n"
-            f"{'Top ' + str(top_n_per_cluster) + ' genes per cluster' if top_n_per_cluster > 0 else 'All genes included'}\n\n"
-            f"Columns: {columns_list}\n"
-            f"The full table is available for download as CSV."
-        )
+
+        if resolved_target is not None:
+            message = (
+                f"Differential expression results table generated for {target_cluster} "
+                f"(resolved to '{resolved_target}').\n"
+                f"Grouping: {groupby}\n"
+                f"Total genes: {len(df)}\n"
+                f"{'Top ' + str(top_n_per_cluster) + ' genes' if top_n_per_cluster > 0 else 'All genes included'}\n\n"
+                f"Columns: {columns_list}\n"
+                f"The full table is available for download as CSV."
+            )
+        else:
+            message = (
+                f"Differential expression results table generated for ALL clusters.\n"
+                f"Grouping: {groupby}\n"
+                f"Clusters: {n_clusters} ({', '.join(str(c) for c in cluster_names[:5])}"
+                f"{'...' if n_clusters > 5 else ''})\n"
+                f"Total genes: {len(df)}\n"
+                f"{'Top ' + str(top_n_per_cluster) + ' genes per cluster' if top_n_per_cluster > 0 else 'All genes included'}\n\n"
+                f"Columns: {columns_list}\n"
+                f"The full table is available for download as CSV."
+            )
 
         # Store the table result
         table_result = TableResult(
@@ -814,6 +1054,50 @@ print(de_results.head())
         return f"Unexpected error: {e}"
 
 
+@tool
+def get_cluster_mapping(groupby: str = "") -> str:
+    """Get the numeric index to cluster/cell type name mapping.
+
+    Use this tool when you need to understand which numeric cluster ID corresponds
+    to which cell type name. This is especially useful when the dataset has
+    annotated cell types instead of numeric cluster IDs.
+
+    Examples of when to use this:
+    - User asks "which cell type is cluster 1?"
+    - User asks "what are the cluster names?"
+    - Before comparing clusters by numeric ID (e.g., "compare cluster 1 vs cluster 5")
+
+    Args:
+        groupby: The observation key for grouping. If empty, auto-detects clustering key.
+
+    Returns:
+        A formatted mapping showing numeric index -> cluster/cell type name.
+    """
+    from src.analysis.cluster_resolution import create_cluster_index_mapping
+
+    adata = _get_adata()
+
+    # Auto-detect clustering key if not provided
+    if not groupby:
+        groupby = _get_cluster_key()
+
+    try:
+        index_mapping = create_cluster_index_mapping(adata, groupby)
+
+        # Format the mapping nicely
+        mapping_lines = [f"Cluster index mapping for '{groupby}':"]
+        for idx, name in index_mapping.items():
+            mapping_lines.append(f"  {idx}: {name}")
+
+        return "\n".join(mapping_lines)
+
+    except ValueError as e:
+        return f"Error: {e}"
+    except Exception as e:
+        logger.exception("Get cluster mapping failed")
+        return f"Unexpected error: {e}"
+
+
 def get_all_tools() -> list:
     """Return all tools for the agent."""
     return [
@@ -822,7 +1106,11 @@ def get_all_tools() -> list:
         heatmap_plot, scatter_plot, volcano_plot_tool,
         # Core tools
         dataset_info, check_data_status, inspect_metadata,
-        preprocess_data, differential_expression, compare_groups_de, get_top_markers, calculate_mito_pct,
+        preprocess_data, differential_expression, get_cluster_degs, compare_groups_de, get_top_markers,
+        # QC and statistics tools
+        calculate_mito_pct, summarize_obs_column, summarize_qc_metrics_tool,
+        # Cluster resolution tools
+        get_cluster_mapping,
         # Table tools
         get_de_results_table, get_pairwise_de_table,
         # Analysis/reasoning tools

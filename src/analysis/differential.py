@@ -12,6 +12,8 @@ import pandas as pd
 import scanpy as sc
 from anndata import AnnData
 
+from src.analysis.cluster_resolution import resolve_pairwise_groups
+
 logger = logging.getLogger(__name__)
 
 
@@ -31,22 +33,58 @@ def run_differential_expression(
     *,
     method: str = "wilcoxon",
     n_genes: int = 20,
+    target_group: str | None = None,
 ) -> DEResult:
-    """Run marker gene analysis across all groups (one-vs-rest for each group).
+    """Run marker gene analysis (one-vs-rest).
 
-    This is equivalent to Seurat's FindAllMarkers(). Use this when you want to
-    identify marker genes that distinguish each cell type/cluster from all others.
+    This is equivalent to Seurat's FindAllMarkers() or FindMarkers(ident.1=group).
+
+    - If target_group is None: runs one-vs-rest for ALL groups
+    - If target_group is specified: runs one-vs-rest for ONLY that group
 
     Args:
         adata: Processed AnnData with clustering.
         groupby: Observation key for grouping.
         method: Statistical method ('wilcoxon', 't-test', 'logreg').
         n_genes: Number of top genes per group. Defaults to 20.
+        target_group: If specified, only analyze this group vs rest. If None, analyze all groups.
     """
     if groupby not in adata.obs.columns:
         available = ", ".join(sorted(adata.obs.columns))
         raise ValueError(f"Key '{groupby}' not found. Available: {available}")
 
+    # If target_group specified, run one-vs-rest for that group only
+    if target_group is not None:
+        available_groups = adata.obs[groupby].astype(str).unique().tolist()
+        if target_group not in available_groups:
+            raise ValueError(
+                f"Group '{target_group}' not found in '{groupby}'. "
+                f"Available groups: {', '.join(available_groups)}"
+            )
+
+        logger.info(
+            "Running one-vs-rest DE for single group: %s (groupby=%s, method=%s, n_genes=%d)",
+            target_group, groupby, method, n_genes
+        )
+        sc.tl.rank_genes_groups(
+            adata,
+            groupby=groupby,
+            groups=[target_group],
+            reference="rest",
+            method=method,
+            n_genes=n_genes
+        )
+
+        df = get_de_dataframe(adata, group=target_group)
+        message = (
+            f"Marker gene analysis complete (one-vs-rest for {target_group}).\n"
+            f"Method: {method} | Grouping: {groupby}\n"
+            f"Top {n_genes} marker genes identified for {target_group} vs all other groups.\n"
+            f"Significant genes (padj < 0.05): {(df['pval_adj'] < 0.05).sum()}"
+        )
+        return DEResult(group=target_group, reference="rest", results_df=df, message=message)
+
+    # Otherwise, run one-vs-rest for ALL groups
     logger.info("Running marker gene analysis: groupby=%s, method=%s, n_genes=%d", groupby, method, n_genes)
     sc.tl.rank_genes_groups(adata, groupby=groupby, method=method, n_genes=n_genes)
 
@@ -66,7 +104,7 @@ def run_pairwise_de(
     adata: AnnData,
     group1: str,
     group2: str,
-    groupby: str = "leiden",
+    groupby: str | None = None,
     *,
     method: str = "wilcoxon",
 ) -> DEResult:
@@ -75,57 +113,45 @@ def run_pairwise_de(
     This is equivalent to Seurat's FindMarkers(ident.1=group1, ident.2=group2).
     Use this when you want to compare two specific cell types/clusters directly.
 
+    Intelligently handles both numeric cluster IDs (0, 1, "Cluster 2") and
+    cell type annotations ("CD4 T cells", "B cells").
+
     Args:
         adata: Processed AnnData with clustering.
-        group1: First group identifier (e.g., "CD4 T cells" or "0").
-        group2: Second group identifier (e.g., "CD8 T cells" or "1").
-        groupby: Observation key for grouping.
+        group1: First group identifier (e.g., "CD4 T cells", "0", "Cluster 1").
+        group2: Second group identifier (e.g., "CD8 T cells", "1", "Cluster 5").
+        groupby: Observation key for grouping. If None, auto-detects.
         method: Statistical method ('wilcoxon', 't-test', 'logreg').
 
     Returns:
         DEResult with comparison results (positive log2FC = higher in group1).
     """
-    if groupby not in adata.obs.columns:
-        available = ", ".join(sorted(adata.obs.columns))
-        raise ValueError(f"Key '{groupby}' not found. Available: {available}")
-
-    # Get unique values in the groupby column
-    available_groups = adata.obs[groupby].unique().tolist()
-    available_groups_str = [str(g) for g in available_groups]
-
-    # Validate group1 and group2
-    if str(group1) not in available_groups_str:
-        raise ValueError(
-            f"Group '{group1}' not found in '{groupby}'. "
-            f"Available groups: {', '.join(available_groups_str)}"
-        )
-    if str(group2) not in available_groups_str:
-        raise ValueError(
-            f"Group '{group2}' not found in '{groupby}'. "
-            f"Available groups: {', '.join(available_groups_str)}"
-        )
+    # Resolve group identifiers intelligently
+    resolved_group1, resolved_group2, resolved_groupby = resolve_pairwise_groups(
+        adata, group1, group2, groupby
+    )
 
     logger.info(
-        "Running pairwise DE: %s vs %s (groupby=%s, method=%s)",
-        group1, group2, groupby, method
+        "Running pairwise DE: %s vs %s (resolved to: %s vs %s in '%s', method=%s)",
+        group1, group2, resolved_group1, resolved_group2, resolved_groupby, method
     )
 
     # Run rank_genes_groups with specific reference
     # This compares group1 vs group2 directly
     sc.tl.rank_genes_groups(
         adata,
-        groupby=groupby,
-        groups=[str(group1)],
-        reference=str(group2),
+        groupby=resolved_groupby,
+        groups=[resolved_group1],
+        reference=resolved_group2,
         method=method,
     )
 
     # Extract results
     result = adata.uns["rank_genes_groups"]
-    genes = result["names"][str(group1)]
-    logfc = result["logfoldchanges"][str(group1)]
-    pvals = result["pvals"][str(group1)]
-    pvals_adj = result["pvals_adj"][str(group1)]
+    genes = result["names"][resolved_group1]
+    logfc = result["logfoldchanges"][resolved_group1]
+    pvals = result["pvals"][resolved_group1]
+    pvals_adj = result["pvals_adj"][resolved_group1]
 
     # Create DataFrame
     df = pd.DataFrame({
@@ -141,6 +167,8 @@ def run_pairwise_de(
     message = (
         f"Pairwise differential expression complete.\n"
         f"Comparison: {group1} vs {group2}\n"
+        f"Grouping column: {resolved_groupby}\n"
+        f"Resolved identifiers: {resolved_group1} vs {resolved_group2}\n"
         f"Method: {method}\n"
         f"Total genes analyzed: {len(df)}\n"
         f"Significant genes (padj < 0.05): {(df['pval_adj'] < 0.05).sum()}\n\n"
@@ -149,7 +177,7 @@ def run_pairwise_de(
         f"- Negative log2FC: Higher expression in {group2}"
     )
 
-    return DEResult(group=str(group1), reference=str(group2), results_df=df, message=message)
+    return DEResult(group=resolved_group1, reference=resolved_group2, results_df=df, message=message)
 
 
 def get_de_dataframe(adata: AnnData, group: str) -> pd.DataFrame:
