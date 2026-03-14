@@ -47,3 +47,31 @@ def validate_obs_key(adata: AnnData, key: str) -> str | None:
         return None
     available = ", ".join(sorted(adata.obs.columns))
     return f"Observation key '{key}' not found. Available keys: {available}."
+
+
+def validate_obs_or_gene(adata: AnnData, field: str) -> str | None:
+    """Return an error message if field is not in adata.obs or adata.var_names, else None.
+
+    This is useful for plotting functions that accept both QC metrics (from obs)
+    and gene names (from var_names).
+
+    Args:
+        adata: The annotated data matrix.
+        field: Field name to validate (can be obs column or gene name).
+
+    Returns:
+        None if field exists, error message otherwise.
+    """
+    # Check if it's an observation column (QC metric)
+    if field in adata.obs.columns:
+        return None
+
+    # Check if it's a gene name
+    if gene_exists(adata, field):
+        return None
+
+    # Not found - provide helpful error
+    gene_err = validate_gene(adata, field)
+    obs_err = validate_obs_key(adata, field)
+
+    return f"'{field}' not found as gene or observation key. {gene_err} {obs_err}"

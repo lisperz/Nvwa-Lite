@@ -208,3 +208,79 @@ def calculate_mito_percentage(adata: AnnData) -> None:
         adata, qc_vars=["mt"], percent_top=None, log1p=False, inplace=True,
     )
     logger.info("Calculated mitochondrial percentage for %d cells (%d MT genes)", adata.n_obs, n_mt_genes)
+
+
+def get_metadata_summary(
+    adata: AnnData,
+    max_unique_values: int = 50,
+    exclude_columns: list[str] | None = None,
+) -> pd.DataFrame:
+    """Scan adata.obs for categorical columns and return structured statistics.
+
+    This function automatically inspects metadata columns in adata.obs and
+    identifies categorical or category-like columns, returning their unique
+    values and counts.
+
+    Args:
+        adata: The annotated data matrix.
+        max_unique_values: Maximum number of unique values to consider a column
+                          as categorical. Columns with more unique values are
+                          excluded to avoid high-cardinality fields.
+        exclude_columns: Optional list of column names to exclude from the summary.
+
+    Returns:
+        DataFrame with columns: column_name, dtype, n_unique, unique_values, value_counts
+        Each row represents one categorical column from adata.obs.
+    """
+    if exclude_columns is None:
+        exclude_columns = []
+
+    results = []
+
+    for col in adata.obs.columns:
+        # Skip excluded columns
+        if col in exclude_columns:
+            continue
+
+        # Get column data
+        col_data = adata.obs[col]
+        dtype = str(col_data.dtype)
+        n_unique = col_data.nunique()
+
+        # Only include categorical-like columns with reasonable cardinality
+        # Skip high-cardinality columns (likely continuous or IDs)
+        if n_unique > max_unique_values:
+            logger.debug(f"Skipping column '{col}' with {n_unique} unique values (exceeds max_unique_values={max_unique_values})")
+            continue
+
+        # Skip numeric columns that look continuous (many unique values relative to total)
+        if pd.api.types.is_numeric_dtype(col_data) and n_unique > min(20, len(col_data) * 0.1):
+            logger.debug(f"Skipping numeric column '{col}' with {n_unique} unique values (likely continuous)")
+            continue
+
+        # Get unique values and counts
+        value_counts = col_data.value_counts().to_dict()
+        unique_values = list(value_counts.keys())
+
+        # Convert to strings for consistent display
+        unique_values_str = [str(v) for v in unique_values]
+        value_counts_str = {str(k): v for k, v in value_counts.items()}
+
+        results.append({
+            "column_name": col,
+            "dtype": dtype,
+            "n_unique": n_unique,
+            "unique_values": unique_values_str,
+            "value_counts": value_counts_str,
+        })
+
+    # Create DataFrame
+    if not results:
+        logger.warning("No categorical columns found in adata.obs")
+        return pd.DataFrame(columns=["column_name", "dtype", "n_unique", "unique_values", "value_counts"])
+
+    df = pd.DataFrame(results)
+    df = df.sort_values("n_unique")  # Sort by number of unique values
+
+    logger.info(f"Found {len(df)} categorical columns in adata.obs")
+    return df

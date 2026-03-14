@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Callable
 from langchain_core.tools import tool
 
 from src.agent import analysis_tools
-from src.analysis.calculations import calculate_mito_percentage
+from src.analysis.calculations import calculate_mito_percentage, get_metadata_summary
 from src.analysis.differential import get_de_dataframe, run_differential_expression, run_pairwise_de, get_all_de_results
 from src.analysis.marker_genes import get_top_marker_genes_per_cluster
 from src.analysis.preprocessing import run_preprocessing
@@ -322,6 +322,65 @@ def check_data_status() -> str:
     if _dataset_state is None:
         return "No dataset state available."
     return _dataset_state.summary()
+
+
+@tool
+def inspect_metadata(max_unique_values: int = 50) -> str:
+    """Inspect categorical metadata columns in adata.obs and return their statistics.
+
+    This tool automatically scans adata.obs for categorical columns (like louvain,
+    cell_type, batch, sample, etc.) and returns their unique values and counts.
+
+    Use this to:
+    - Discover what metadata is available in the dataset
+    - See cluster/cell type distributions
+    - Identify batch effects or sample groupings
+    - Understand categorical annotations
+
+    Args:
+        max_unique_values: Maximum number of unique values to consider a column
+                          as categorical (default: 50). Columns with more unique
+                          values are excluded to avoid high-cardinality fields.
+
+    Returns:
+        Formatted summary of categorical metadata columns with their unique values
+        and counts.
+    """
+    adata = _get_adata()
+
+    try:
+        df = get_metadata_summary(adata, max_unique_values=max_unique_values)
+
+        if df.empty:
+            return "No categorical metadata columns found in adata.obs."
+
+        # Format output
+        result = f"Found {len(df)} categorical metadata columns in adata.obs:\n\n"
+
+        for _, row in df.iterrows():
+            col_name = row["column_name"]
+            dtype = row["dtype"]
+            n_unique = row["n_unique"]
+            value_counts = row["value_counts"]
+
+            result += f"Column: {col_name}\n"
+            result += f"  Type: {dtype}\n"
+            result += f"  Unique values: {n_unique}\n"
+            result += f"  Distribution:\n"
+
+            # Sort by count (descending)
+            sorted_counts = sorted(value_counts.items(), key=lambda x: -x[1])
+            for value, count in sorted_counts:
+                percentage = (count / adata.n_obs) * 100
+                result += f"    {value}: {count:,} cells ({percentage:.1f}%)\n"
+
+            result += "\n"
+
+        return result.strip()
+
+    except Exception as e:
+        logger.exception("Metadata inspection failed")
+        return f"Error inspecting metadata: {e}"
 
 
 @tool
@@ -762,7 +821,7 @@ def get_all_tools() -> list:
         umap_plot, violin_plot, dotplot, feature_plot,
         heatmap_plot, scatter_plot, volcano_plot_tool,
         # Core tools
-        dataset_info, check_data_status,
+        dataset_info, check_data_status, inspect_metadata,
         preprocess_data, differential_expression, compare_groups_de, get_top_markers, calculate_mito_pct,
         # Table tools
         get_de_results_table, get_pairwise_de_table,
