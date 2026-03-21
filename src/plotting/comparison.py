@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 import scanpy as sc
 from anndata import AnnData
 
-from src.plotting.validation import validate_gene, validate_obs_key
+from src.plotting.validation import validate_gene, validate_obs_key, validate_obs_or_gene
 
 logger = logging.getLogger(__name__)
 
@@ -143,35 +143,30 @@ def plot_scatter(
     gene_y: str,
     color_by: str | None = None,
 ) -> PlotResult:
-    """Generate a scatter plot showing correlation between two genes.
+    """Generate a scatter plot showing correlation between two variables.
 
     Args:
         adata: The annotated data matrix.
-        gene_x: Gene name for x-axis.
-        gene_y: Gene name for y-axis.
-        color_by: Optional observation key or gene to color points by.
+        gene_x: Gene name or obs column for x-axis (e.g., 'CD3E' or 'total_counts').
+        gene_y: Gene name or obs column for y-axis (e.g., 'CD4' or 'n_genes_by_counts').
+        color_by: Optional observation key or gene to color points by (e.g., 'pct_counts_mt').
 
     Returns:
         PlotResult with image, code, and description.
     """
-    # Validate genes
-    err_x = validate_gene(adata, gene_x)
+    # Validate x and y - can be genes OR obs columns (QC metrics)
+    err_x = validate_obs_or_gene(adata, gene_x)
     if err_x:
         raise ValueError(err_x)
-    err_y = validate_gene(adata, gene_y)
+    err_y = validate_obs_or_gene(adata, gene_y)
     if err_y:
         raise ValueError(err_y)
 
     # Validate color_by if provided
     if color_by:
-        from src.plotting.validation import gene_exists
-        is_obs = color_by in adata.obs.columns
-        is_gene = gene_exists(adata, color_by)
-        if not is_obs and not is_gene:
-            err = validate_gene(adata, color_by)
-            if err is None:
-                err = validate_obs_key(adata, color_by)
-            raise ValueError(err or f"'{color_by}' not found as gene or observation key.")
+        err_color = validate_obs_or_gene(adata, color_by)
+        if err_color:
+            raise ValueError(err_color)
 
     # Build code string
     code = f'sc.pl.scatter(adata, x="{gene_x}", y="{gene_y}"'
