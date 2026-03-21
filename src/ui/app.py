@@ -27,9 +27,9 @@ from src.plotting.styles import configure_plot_style
 from src.session.manager import SessionManager
 from src.types import DatasetState, detect_dataset_state
 from src.ui.components import (
-    dataset_info_panel,
     example_queries,
     file_upload_widget,
+    pipeline_panel,
 )
 
 # ---------------------------------------------------------------------------
@@ -190,7 +190,7 @@ if need_reload:
 adata = st.session_state.adata
 ds_state = st.session_state.ds_state
 
-dataset_info_panel(adata, state=ds_state)
+pipeline_panel(ds_state)
 example_queries()
 
 

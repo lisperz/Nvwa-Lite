@@ -49,6 +49,9 @@ def run_differential_expression(
         n_genes: Number of top genes per group. Defaults to 20.
         target_group: If specified, only analyze this group vs rest. If None, analyze all groups.
     """
+    if n_genes <= 0:
+        n_genes = adata.n_vars  # all genes
+
     if groupby not in adata.obs.columns:
         available = ", ".join(sorted(adata.obs.columns))
         raise ValueError(f"Key '{groupby}' not found. Available: {available}")

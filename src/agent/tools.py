@@ -438,7 +438,7 @@ def preprocess_data(
 
 
 @tool
-def differential_expression(groupby: str = "", method: str = "wilcoxon") -> str:
+def differential_expression(groupby: str = "", method: str = "wilcoxon", n_genes: int = 20) -> str:
     """Run marker gene analysis to find distinguishing genes for ALL clusters/cell types.
 
     This performs one-vs-rest analysis for ALL groups (like Seurat's FindAllMarkers).
@@ -454,9 +454,15 @@ def differential_expression(groupby: str = "", method: str = "wilcoxon") -> str:
     - For ONE specific cluster: use get_cluster_degs instead
     - For comparing TWO clusters: use compare_groups_de instead
 
+    IMPORTANT - n_genes parameter:
+    - Default is 20 (top 20 marker genes per cluster).
+    - When user asks for "all markers", "complete marker table", "all genes per cluster",
+      or "show all markers for each cluster", pass n_genes=0 to compute ALL markers.
+
     Args:
         groupby: The observation key for grouping. If empty, auto-detects clustering key.
         method: Statistical method ('wilcoxon', 't-test', 'logreg').
+        n_genes: Number of top genes per cluster. Default 20. Use 0 for all genes.
 
     Returns:
         Summary message. Results are stored and can be accessed via get_top_markers
@@ -469,7 +475,7 @@ def differential_expression(groupby: str = "", method: str = "wilcoxon") -> str:
         groupby = _get_cluster_key()
 
     try:
-        result = run_differential_expression(adata, groupby=groupby, method=method, target_group=None)
+        result = run_differential_expression(adata, groupby=groupby, method=method, n_genes=n_genes, target_group=None)
         _update_state()
         return result.message
     except ValueError as e:
@@ -483,7 +489,8 @@ def differential_expression(groupby: str = "", method: str = "wilcoxon") -> str:
 def get_cluster_degs(
     cluster: str,
     groupby: str = "",
-    method: str = "wilcoxon"
+    method: str = "wilcoxon",
+    n_genes: int = 20,
 ) -> str:
     """Get differentially expressed genes for ONE specific cluster (one-vs-rest).
 
@@ -501,10 +508,16 @@ def get_cluster_degs(
     - For ALL clusters: use differential_expression instead
     - For comparing TWO clusters: use compare_groups_de instead
 
+    IMPORTANT - n_genes parameter:
+    - Default is 20 (top 20 marker genes).
+    - When user asks for "all markers", "all DEGs", or "complete marker list",
+      pass n_genes=0 to compute ALL markers for this cluster.
+
     Args:
         cluster: The cluster/group identifier (e.g., "3", "Cluster 4", "B cells", "CD4 T cells").
         groupby: Optional observation key for grouping. Leave empty for auto-detection.
         method: Statistical method ('wilcoxon', 't-test', 'logreg').
+        n_genes: Number of top genes. Default 20. Use 0 for all genes.
 
     Returns:
         Summary message with DEG results. Results are stored and can be accessed
@@ -530,7 +543,8 @@ def get_cluster_degs(
             adata,
             groupby=resolved_groupby,
             method=method,
-            target_group=resolved_cluster
+            n_genes=n_genes,
+            target_group=resolved_cluster,
         )
         _update_state()
         return result.message
