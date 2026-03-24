@@ -23,7 +23,7 @@ data/uploads/
 .DS_Store
 
 # Internal planning documents (local only)
-discuss/
+# discuss/
 
 # Pilot tokens (contains sensitive authentication data)
 pilot_tokens.json
