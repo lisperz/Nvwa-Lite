@@ -1,218 +1,238 @@
-"""Analytics service for parsing and aggregating structured logs.
+"""Analytics service — queries RDS PostgreSQL for dashboard metrics.
 
-Provides real-time metrics for the monitoring dashboard by reading
-and analyzing JSON log files.
+All public methods return plain Python dicts/lists so the dashboard layer
+has no SQL dependency.  Every method catches DB errors and returns empty
+results so the dashboard degrades gracefully when the DB is unavailable.
 """
 
 from __future__ import annotations
 
-import json
-from collections import defaultdict
-from datetime import datetime, timedelta, timezone
-from pathlib import Path
+import logging
 from typing import Any
 
+from src.db.client import get_conn
 
-class AnalyticsService:
-    """Parse and aggregate structured logs for dashboard display."""
+logger = logging.getLogger(__name__)
 
-    def __init__(self, log_dir: Path | str = "logs") -> None:
-        """Initialize analytics service.
+# gpt-4o-mini pricing (USD per 1 000 tokens, as of 2025)
+_INPUT_COST_PER_1K = 0.000150
+_OUTPUT_COST_PER_1K = 0.000600
 
-        Args:
-            log_dir: Directory containing JSON log files.
+
+def _cost(input_tokens: int, output_tokens: int) -> float:
+    return (
+        input_tokens / 1000 * _INPUT_COST_PER_1K
+        + output_tokens / 1000 * _OUTPUT_COST_PER_1K
+    )
+
+
+def _query(sql: str, params: tuple = ()) -> list[dict[str, Any]]:
+    """Run a SELECT and return rows as dicts.  Returns [] on any error."""
+    try:
+        with get_conn() as conn:
+            if conn is None:
+                return []
+            with conn.cursor() as cur:
+                cur.execute(sql, params)
+                cols = [d[0] for d in cur.description]
+                return [dict(zip(cols, row)) for row in cur.fetchall()]
+    except Exception as exc:
+        logger.error("Analytics query failed: %s", exc)
+        return []
+
+
+# ---------------------------------------------------------------------------
+# Overview KPIs
+# ---------------------------------------------------------------------------
+
+def get_overview(hours: int = 24) -> dict[str, Any]:
+    """Top-level numbers for the KPI tiles."""
+    rows = _query(
         """
-        self.log_dir = Path(log_dir)
-
-    def _read_log_file(self, filename: str) -> list[dict[str, Any]]:
-        """Read and parse a JSON log file."""
-        log_path = self.log_dir / filename
-        if not log_path.exists():
-            return []
-
-        entries = []
-        with open(log_path) as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    entries.append(json.loads(line))
-                except json.JSONDecodeError:
-                    continue
-        return entries
-
-    def get_active_users(self, hours: int = 24) -> set[str]:
-        """Get unique users active in the last N hours."""
-        cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
-        users = set()
-
-        for log_file in ["user_interaction.log", "tool_execution.log"]:
-            entries = self._read_log_file(log_file)
-            for entry in entries:
-                try:
-                    timestamp = datetime.fromisoformat(entry["timestamp"].replace("Z", "+00:00"))
-                    if timestamp >= cutoff:
-                        users.add(entry["user_id"])
-                except (KeyError, ValueError):
-                    continue
-
-        return users
-
-    def get_total_sessions(self, hours: int = 24) -> int:
-        """Get total unique sessions in the last N hours."""
-        cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
-        sessions = set()
-
-        entries = self._read_log_file("user_interaction.log")
-        for entry in entries:
-            try:
-                timestamp = datetime.fromisoformat(entry["timestamp"].replace("Z", "+00:00"))
-                if timestamp >= cutoff:
-                    sessions.add(entry["session_id"])
-            except (KeyError, ValueError):
-                continue
-
-        return len(sessions)
-
-    def get_tool_usage_stats(self, hours: int = 24) -> dict[str, int]:
-        """Get tool usage counts in the last N hours."""
-        cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
-        tool_counts = defaultdict(int)
-
-        entries = self._read_log_file("tool_execution.log")
-        for entry in entries:
-            try:
-                timestamp = datetime.fromisoformat(entry["timestamp"].replace("Z", "+00:00"))
-                if timestamp >= cutoff and entry["event"] == "tool_execution":
-                    tool_name = entry["payload"].get("tool_name", "unknown")
-                    tool_counts[tool_name] += 1
-            except (KeyError, ValueError):
-                continue
-
-        return dict(tool_counts)
-
-    def get_error_count(self, hours: int = 24) -> int:
-        """Get total error count in the last N hours."""
-        cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
-        error_count = 0
-
-        entries = self._read_log_file("tool_execution.log")
-        for entry in entries:
-            try:
-                timestamp = datetime.fromisoformat(entry["timestamp"].replace("Z", "+00:00"))
-                if timestamp >= cutoff:
-                    status = entry["payload"].get("status")
-                    if status == "error":
-                        error_count += 1
-            except (KeyError, ValueError):
-                continue
-
-        return error_count
-
-    def get_total_token_usage(self, hours: int = 24) -> dict[str, int]:
-        """Get aggregated token usage in the last N hours."""
-        cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
-        total_tokens = 0
-        prompt_tokens = 0
-        completion_tokens = 0
-
-        entries = self._read_log_file("system_metrics.log")
-        for entry in entries:
-            try:
-                timestamp = datetime.fromisoformat(entry["timestamp"].replace("Z", "+00:00"))
-                if timestamp >= cutoff and entry["event"] == "token_usage":
-                    payload = entry["payload"]
-                    total_tokens += payload.get("total_tokens", 0)
-                    prompt_tokens += payload.get("input_tokens", 0)
-                    completion_tokens += payload.get("output_tokens", 0)
-            except (KeyError, ValueError):
-                continue
-
+        SELECT
+            COUNT(DISTINCT cm.user_id)                          AS active_users,
+            COUNT(DISTINCT cm.session_id)                       AS active_sessions,
+            COUNT(*)                                            AS total_messages,
+            COALESCE(SUM(te.cnt), 0)                           AS total_tool_calls,
+            COALESCE(SUM(te.errors), 0)                        AS total_errors,
+            COALESCE(SUM(tu.input_tokens), 0)                  AS input_tokens,
+            COALESCE(SUM(tu.output_tokens), 0)                 AS output_tokens
+        FROM chat_messages cm
+        LEFT JOIN (
+            SELECT session_id,
+                   COUNT(*) AS cnt,
+                   SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) AS errors
+            FROM tool_executions
+            WHERE created_at >= NOW() - INTERVAL '%s hours'
+            GROUP BY session_id
+        ) te ON te.session_id = cm.session_id
+        LEFT JOIN (
+            SELECT session_id,
+                   SUM(input_tokens) AS input_tokens,
+                   SUM(output_tokens) AS output_tokens
+            FROM token_usage
+            WHERE created_at >= NOW() - INTERVAL '%s hours'
+            GROUP BY session_id
+        ) tu ON tu.session_id = cm.session_id
+        WHERE cm.created_at >= NOW() - INTERVAL '%s hours'
+        """,
+        (hours, hours, hours),
+    )
+    if not rows:
         return {
-            "total": total_tokens,
-            "prompt": prompt_tokens,
-            "completion": completion_tokens,
+            "active_users": 0, "active_sessions": 0, "total_messages": 0,
+            "total_tool_calls": 0, "total_errors": 0,
+            "input_tokens": 0, "output_tokens": 0, "estimated_cost_usd": 0.0,
         }
+    r = rows[0]
+    r["estimated_cost_usd"] = _cost(r["input_tokens"], r["output_tokens"])
+    return r
 
-    def get_average_response_time(self, hours: int = 24) -> float:
-        """Get average tool execution time in the last N hours (in seconds)."""
-        cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
-        durations = []
 
-        entries = self._read_log_file("tool_execution.log")
-        for entry in entries:
-            try:
-                timestamp = datetime.fromisoformat(entry["timestamp"].replace("Z", "+00:00"))
-                if timestamp >= cutoff and entry["event"] == "tool_execution":
-                    duration_ms = entry["payload"].get("duration_ms", 0)
-                    if duration_ms > 0:
-                        durations.append(duration_ms / 1000.0)
-            except (KeyError, ValueError):
-                continue
+# ---------------------------------------------------------------------------
+# Hourly activity (for sparkline / bar chart)
+# ---------------------------------------------------------------------------
 
-        return sum(durations) / len(durations) if durations else 0.0
+def get_hourly_activity(hours: int = 24) -> list[dict[str, Any]]:
+    """Message count grouped by hour, ordered ascending."""
+    return _query(
+        """
+        SELECT
+            date_trunc('hour', created_at) AS hour,
+            COUNT(*) AS messages
+        FROM chat_messages
+        WHERE created_at >= NOW() - INTERVAL '%s hours'
+          AND role = 'user'
+        GROUP BY 1
+        ORDER BY 1
+        """,
+        (hours,),
+    )
 
-    def get_recent_errors(self, limit: int = 10) -> list[dict[str, Any]]:
-        """Get most recent errors."""
-        entries = self._read_log_file("tool_execution.log")
-        errors = []
 
-        for entry in entries:
-            try:
-                if entry["payload"].get("status") == "error":
-                    errors.append({
-                        "timestamp": entry["timestamp"],
-                        "user_id": entry["user_id"],
-                        "session_id": entry["session_id"],
-                        "tool_name": entry["payload"].get("tool_name", "unknown"),
-                        "error": entry["payload"].get("result", "Unknown error"),
-                    })
-            except KeyError:
-                continue
+# ---------------------------------------------------------------------------
+# Per-user breakdown
+# ---------------------------------------------------------------------------
 
-        # Sort by timestamp descending and return most recent
-        errors.sort(key=lambda x: x["timestamp"], reverse=True)
-        return errors[:limit]
+def get_user_breakdown(hours: int = 24) -> list[dict[str, Any]]:
+    """One row per user with aggregated stats, sorted by messages desc."""
+    return _query(
+        """
+        SELECT
+            cm.user_id,
+            COUNT(DISTINCT cm.session_id)                       AS sessions,
+            SUM(CASE WHEN cm.role = 'user' THEN 1 ELSE 0 END)  AS messages,
+            COALESCE(SUM(te.tool_calls), 0)                    AS tool_calls,
+            COALESCE(SUM(tu.total_tokens), 0)                  AS total_tokens,
+            COALESCE(SUM(tu.input_tokens), 0)                  AS input_tokens,
+            COALESCE(SUM(tu.output_tokens), 0)                 AS output_tokens,
+            MAX(cm.created_at)                                  AS last_seen
+        FROM chat_messages cm
+        LEFT JOIN (
+            SELECT user_id, session_id, COUNT(*) AS tool_calls
+            FROM tool_executions
+            WHERE created_at >= NOW() - INTERVAL '%s hours'
+            GROUP BY user_id, session_id
+        ) te ON te.user_id = cm.user_id AND te.session_id = cm.session_id
+        LEFT JOIN (
+            SELECT user_id, session_id,
+                   SUM(input_tokens + output_tokens) AS total_tokens,
+                   SUM(input_tokens) AS input_tokens,
+                   SUM(output_tokens) AS output_tokens
+            FROM token_usage
+            WHERE created_at >= NOW() - INTERVAL '%s hours'
+            GROUP BY user_id, session_id
+        ) tu ON tu.user_id = cm.user_id AND tu.session_id = cm.session_id
+        WHERE cm.created_at >= NOW() - INTERVAL '%s hours'
+        GROUP BY cm.user_id
+        ORDER BY messages DESC
+        """,
+        (hours, hours, hours),
+    )
 
-    def get_user_activity(self, hours: int = 24) -> list[dict[str, Any]]:
-        """Get per-user activity summary."""
-        cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
-        user_stats = defaultdict(lambda: {"messages": 0, "tools": 0, "sessions": set()})
 
-        # Count messages
-        entries = self._read_log_file("user_interaction.log")
-        for entry in entries:
-            try:
-                timestamp = datetime.fromisoformat(entry["timestamp"].replace("Z", "+00:00"))
-                if timestamp >= cutoff:
-                    user_id = entry["user_id"]
-                    user_stats[user_id]["messages"] += 1
-                    user_stats[user_id]["sessions"].add(entry["session_id"])
-            except (KeyError, ValueError):
-                continue
+# ---------------------------------------------------------------------------
+# Sessions
+# ---------------------------------------------------------------------------
 
-        # Count tool executions
-        entries = self._read_log_file("tool_execution.log")
-        for entry in entries:
-            try:
-                timestamp = datetime.fromisoformat(entry["timestamp"].replace("Z", "+00:00"))
-                if timestamp >= cutoff and entry["event"] == "tool_execution":
-                    user_id = entry["user_id"]
-                    user_stats[user_id]["tools"] += 1
-            except (KeyError, ValueError):
-                continue
+def get_recent_sessions(hours: int = 24, limit: int = 50) -> list[dict[str, Any]]:
+    """Recent analysis sessions with metadata."""
+    return _query(
+        """
+        SELECT
+            s.session_id,
+            s.user_id,
+            s.filename,
+            s.status,
+            s.message_count,
+            s.started_at,
+            s.ended_at,
+            EXTRACT(EPOCH FROM (COALESCE(s.ended_at, NOW()) - s.started_at))::int
+                AS duration_seconds
+        FROM analysis_sessions s
+        WHERE s.started_at >= NOW() - INTERVAL '%s hours'
+        ORDER BY s.started_at DESC
+        LIMIT %s
+        """,
+        (hours, limit),
+    )
 
-        # Convert to list format
-        result = []
-        for user_id, stats in user_stats.items():
-            result.append({
-                "user_id": user_id,
-                "messages": stats["messages"],
-                "tools": stats["tools"],
-                "sessions": len(stats["sessions"]),
-            })
 
-        result.sort(key=lambda x: x["messages"], reverse=True)
-        return result
+def get_session_messages(session_id: str) -> list[dict[str, Any]]:
+    """All chat messages for a specific session."""
+    return _query(
+        """
+        SELECT role, content, tool_called, response_ms, created_at
+        FROM chat_messages
+        WHERE session_id = %s
+        ORDER BY created_at
+        """,
+        (session_id,),
+    )
 
+
+# ---------------------------------------------------------------------------
+# Tool analytics
+# ---------------------------------------------------------------------------
+
+def get_tool_stats(hours: int = 24) -> list[dict[str, Any]]:
+    """Per-tool usage count, error count, avg duration — sorted by calls desc."""
+    return _query(
+        """
+        SELECT
+            tool_name,
+            COUNT(*)                                                    AS total_calls,
+            SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END)         AS errors,
+            ROUND(AVG(duration_ms)::numeric, 1)                        AS avg_ms,
+            ROUND(MAX(duration_ms)::numeric, 1)                        AS max_ms
+        FROM tool_executions
+        WHERE created_at >= NOW() - INTERVAL '%s hours'
+        GROUP BY tool_name
+        ORDER BY total_calls DESC
+        """,
+        (hours,),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Recent errors
+# ---------------------------------------------------------------------------
+
+def get_recent_errors(hours: int = 24, limit: int = 20) -> list[dict[str, Any]]:
+    """Most recent failed tool executions."""
+    return _query(
+        """
+        SELECT
+            created_at,
+            user_id,
+            session_id,
+            tool_name,
+            result_preview AS error_preview
+        FROM tool_executions
+        WHERE status = 'error'
+          AND created_at >= NOW() - INTERVAL '%s hours'
+        ORDER BY created_at DESC
+        LIMIT %s
+        """,
+        (hours, limit),
+    )
