@@ -9,6 +9,7 @@ Or set DATABASE_URL in .env and run:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sys
@@ -49,13 +50,14 @@ try:
     with conn:
         with conn.cursor() as cur:
             for user_id, info in tokens.items():
+                token_hash = hashlib.sha256(info["token"].encode()).hexdigest()
                 cur.execute(
                     """
-                    INSERT INTO users (user_id, email, token)
+                    INSERT INTO users (user_id, email, token_hash)
                     VALUES (%s, %s, %s)
                     ON CONFLICT (user_id) DO NOTHING
                     """,
-                    (user_id, info["email"], info["token"]),
+                    (user_id, info["email"], token_hash),
                 )
                 if cur.rowcount:
                     inserted += 1
