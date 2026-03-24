@@ -33,6 +33,7 @@ services:
       - REDIS_PORT=6379
     volumes:
       - ./src:/app/src
+      - ./.streamlit:/app/.streamlit
       - ./logs:/app/logs
       - ./data/uploads:/app/data/uploads
       - ./pilot_tokens.json:/app/pilot_tokens.json
