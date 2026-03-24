@@ -7,6 +7,7 @@ results so the dashboard degrades gracefully when the DB is unavailable.
 
 from __future__ import annotations
 
+import decimal
 import logging
 from typing import Any
 
@@ -35,7 +36,13 @@ def _query(sql: str, params: tuple = ()) -> list[dict[str, Any]]:
             with conn.cursor() as cur:
                 cur.execute(sql, params)
                 cols = [d[0] for d in cur.description]
-                return [dict(zip(cols, row)) for row in cur.fetchall()]
+                rows = []
+                for row in cur.fetchall():
+                    rows.append({
+                        k: float(v) if isinstance(v, decimal.Decimal) else v
+                        for k, v in zip(cols, row)
+                    })
+                return rows
     except Exception as exc:
         logger.error("Analytics query failed: %s", exc)
         return []
