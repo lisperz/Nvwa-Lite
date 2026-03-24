@@ -44,7 +44,7 @@ services:
 
   dashboard:
     build: .
-    command: ["uv", "run", "streamlit", "run", "src/monitoring/dashboard.py", "--server.port=8502", "--server.address=0.0.0.0", "--server.headless=true"]
+    command: ["uv", "run", "streamlit", "run", "src/monitoring/dashboard.py", "--server.port=8502", "--server.address=0.0.0.0", "--server.headless=true", "--server.baseUrlPath=/admin"]
     ports:
       - "8502:8502"
     env_file:
