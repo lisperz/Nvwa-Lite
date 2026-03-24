@@ -638,11 +638,19 @@ def get_top_markers(n_genes_per_cluster: int = 10, groupby: str = "") -> str:
         groupby = _get_cluster_key()
 
     try:
+        from src.analysis.marker_genes import get_top_marker_genes_per_cluster_exact
+
+        cluster_genes = get_top_marker_genes_per_cluster_exact(
+            adata, n_genes=n_genes_per_cluster, groupby=groupby
+        )
         genes = get_top_marker_genes_per_cluster(adata, n_genes=n_genes_per_cluster, groupby=groupby)
 
-        result = f"Top {n_genes_per_cluster} marker genes per cluster:\n"
-        result += f"Total unique genes: {len(genes)}\n\n"
-        result += "Genes (comma-separated for heatmap):\n"
+        # Show per-cluster breakdown so the agent knows ALL genes must be used
+        result = f"Top {n_genes_per_cluster} marker genes per cluster ({len(cluster_genes)} clusters):\n\n"
+        for cluster, cluster_gene_list in cluster_genes.items():
+            result += f"  {cluster}: {', '.join(cluster_gene_list)}\n"
+        result += f"\nTotal unique genes: {len(genes)}\n"
+        result += "IMPORTANT: Use ALL genes below for dotplot/heatmap (not just one cluster's genes):\n"
         result += ",".join(genes)
 
         return result

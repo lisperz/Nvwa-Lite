@@ -1,6 +1,72 @@
-# Session Summary — 2026-03-21 (Latest Update)
+# Session Summary — 2026-03-23 (Latest Update)
 
-## Recent Changes This Session (2026-03-21)
+## Recent Changes This Session (2026-03-23)
+
+### 1. Landing Page Created
+
+**Context:** Built a public-facing marketing landing page for the Nvwa service.
+
+**Solution:**
+- Created `landing/index.html` — standalone static HTML landing page
+- Tech: Plain HTML/CSS, no framework, no build step
+- Font: Plus Jakarta Sans (Google Fonts)
+- Design system: Blue `#2563EB` primary, orange `#F97316` CTA, clean minimalist SaaS style
+- Sections: Navbar, Hero (with animated demo window), Social proof logos, Features (6 cards), How it works (3 steps), Testimonials (3), Pricing (3 tiers), Final CTA, Footer
+- All "Request Access" / "Request Early Access" / bottom CTA buttons link to `http://localhost:8501` (local) — update to production URL when deploying
+
+**Files Created:**
+- `landing/index.html` — full landing page
+
+---
+
+### 2. Landing Page Served via Nginx (Local Docker)
+
+**Context:** Wired the landing page into the local Docker stack so the full user flow works locally.
+
+**Solution:**
+- Added `nginx/landing.conf` — nginx server block serving `landing/` on port 80
+- Added `landing` service to `docker-compose.yml` (nginx:alpine, port 80, mounts `../landing/` and `nginx/landing.conf`)
+- Added `scripts/start_landing.sh` — convenience script to start landing + redis + nvwa-lite together
+- Updated `scripts/start_local_test.sh` to show landing URL in output
+
+**Local user flow:**
+```
+http://localhost  →  landing page
+  click "Request Access"
+    →  http://localhost:8501  (Streamlit token auth)
+```
+
+**Files Created/Modified:**
+- `nginx/landing.conf` — new nginx config
+- `docker-compose.yml` — added `landing` service
+- `scripts/start_landing.sh` — new convenience start script
+- `scripts/start_local_test.sh` — updated access point output
+
+---
+
+### 3. Docker Cleanup — Freed ~9.1 GB
+
+**Context:** Removed outdated and unused Docker images and build cache to free disk space.
+
+**What was removed:**
+- `nvwa-lite-dashboard:latest` image — 3.5 GB (dashboard container was unhealthy and not needed)
+- Full build cache (17 layers) — 5.6 GB
+
+**Commands used:**
+```bash
+docker stop nvwa-lite-dashboard-1 && docker rm nvwa-lite-dashboard-1
+docker image rm nvwa-lite-dashboard:latest
+docker builder prune -af
+```
+
+**Current active images:**
+- `nvwa-lite-nvwa-lite:latest` — 3.5 GB (main app)
+- `nginx:alpine` — 92 MB (landing page)
+- `redis:7-alpine` — 61 MB (session store)
+
+---
+
+## Previous Session (2026-03-21)
 
 ### 1. Support "All Markers" in Marker Table Export
 
