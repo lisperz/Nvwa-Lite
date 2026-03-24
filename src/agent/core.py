@@ -16,6 +16,7 @@ from langchain_openai import ChatOpenAI
 
 from src.agent.prompts import build_system_prompt
 from src.agent.tools import bind_dataset, bind_dataset_state, get_all_tools
+from src.db.logger import DatabaseLogger
 from src.logging.service import EventLogger
 
 if TYPE_CHECKING:
@@ -67,10 +68,12 @@ def create_agent(
 
     # Initialize event logger if user_id and session_id provided
     event_logger = None
+    db_logger = None
     if user_id and session_id:
         event_logger = EventLogger()
+        db_logger = DatabaseLogger()
 
-    return AgentRunner(llm_with_tools, tools, system_prompt, event_logger, user_id, session_id)
+    return AgentRunner(llm_with_tools, tools, system_prompt, event_logger, db_logger, user_id, session_id)
 
 
 class AgentRunner:
@@ -86,6 +89,7 @@ class AgentRunner:
         tools: list,
         system_prompt: str,
         event_logger: EventLogger | None = None,
+        db_logger: DatabaseLogger | None = None,
         user_id: str | None = None,
         session_id: str | None = None,
     ) -> None:
@@ -93,6 +97,7 @@ class AgentRunner:
         self._tools = {t.name: t for t in tools}
         self._system_prompt = system_prompt
         self._event_logger = event_logger
+        self._db_logger = db_logger
         self._user_id = user_id
         self._session_id = session_id
 
@@ -100,9 +105,14 @@ class AgentRunner:
         self,
         user_input: str,
         chat_history: list | None = None,
+        filename: str = "unknown",
     ) -> AgentResponse:
         """Run the agent on a user query."""
         start_time = time.time()
+
+        # Ensure DB session row exists before logging anything
+        if self._db_logger and self._user_id and self._session_id:
+            self._db_logger.ensure_session(self._user_id, self._session_id, filename)
 
         messages = [SystemMessage(content=self._system_prompt)]
 
@@ -159,6 +169,16 @@ class AgentRunner:
                                 duration_ms=tool_duration * 1000,
                                 status="success"
                             )
+                        if self._db_logger and self._user_id and self._session_id:
+                            self._db_logger.log_tool_execution(
+                                user_id=self._user_id,
+                                session_id=self._session_id,
+                                tool_name=tool_name,
+                                args=tool_args,
+                                result=str(result),
+                                duration_ms=tool_duration * 1000,
+                                status="success"
+                            )
                     except Exception as e:
                         logger.exception("Tool execution failed: %s", tool_name)
                         result = f"Error executing {tool_name}: {e}"
@@ -167,6 +187,16 @@ class AgentRunner:
                         # Log failed tool execution
                         if self._event_logger and self._user_id and self._session_id:
                             self._event_logger.log_tool_execution(
+                                user_id=self._user_id,
+                                session_id=self._session_id,
+                                tool_name=tool_name,
+                                args=tool_args,
+                                result=str(e),
+                                duration_ms=tool_duration * 1000,
+                                status="error"
+                            )
+                        if self._db_logger and self._user_id and self._session_id:
+                            self._db_logger.log_tool_execution(
                                 user_id=self._user_id,
                                 session_id=self._session_id,
                                 tool_name=tool_name,
@@ -192,6 +222,14 @@ class AgentRunner:
                 response_time_ms=response_time * 1000,
                 tool_called=tool_called
             )
+        if self._db_logger and self._user_id and self._session_id:
+            self._db_logger.log_user_message(
+                user_id=self._user_id,
+                session_id=self._session_id,
+                message=user_input,
+                response_time_ms=response_time * 1000,
+                tool_called=tool_called
+            )
 
         # Log token usage
         if self._event_logger and self._user_id and self._session_id and total_tokens > 0:
@@ -200,6 +238,14 @@ class AgentRunner:
                 session_id=self._session_id,
                 input_tokens=0,  # Not easily extractable from aggregated usage
                 output_tokens=total_tokens,  # Use total as output for now
+                model=self._llm.model_name if hasattr(self._llm, "model_name") else "gpt-4o-mini"
+            )
+        if self._db_logger and self._user_id and self._session_id and total_tokens > 0:
+            self._db_logger.log_token_usage(
+                user_id=self._user_id,
+                session_id=self._session_id,
+                input_tokens=0,
+                output_tokens=total_tokens,
                 model=self._llm.model_name if hasattr(self._llm, "model_name") else "gpt-4o-mini"
             )
 

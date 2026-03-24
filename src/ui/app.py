@@ -313,6 +313,7 @@ if prompt := st.chat_input("Ask about your data... (e.g., 'Show me the UMAP plot
             response = agent.invoke(
                 user_input=prompt,
                 chat_history=st.session_state.chat_history[:-1],
+                filename=ds_state.filename,
             )
 
             plot_results = get_plot_results()
