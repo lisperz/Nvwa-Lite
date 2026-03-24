@@ -7,6 +7,7 @@ Run via docker-compose (port 8502) or: uv run streamlit run src/monitoring/dashb
 from __future__ import annotations
 
 import logging
+import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -44,6 +45,27 @@ st.set_page_config(
     page_icon="🧬",
     layout="wide",
 )
+
+# ---------------------------------------------------------------------------
+# Admin auth gate
+# ---------------------------------------------------------------------------
+
+_ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
+
+if not _ADMIN_PASSWORD:
+    st.error("ADMIN_PASSWORD environment variable is not set.")
+    st.stop()
+
+if not st.session_state.get("admin_authed"):
+    st.title("🔒 Admin Login")
+    pw = st.text_input("Password", type="password")
+    if st.button("Login"):
+        if pw == _ADMIN_PASSWORD:
+            st.session_state["admin_authed"] = True
+            st.rerun()
+        else:
+            st.error("Incorrect password.")
+    st.stop()
 
 st.title("🧬 Nvwa Admin Dashboard")
 
