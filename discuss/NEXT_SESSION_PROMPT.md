@@ -2,7 +2,45 @@
 
 ## Recent Changes This Session (2026-03-25)
 
-### 1. Verified DB Logging Live on EC2
+### 1. S3 Integration for File Uploads and Artifacts
+
+**Context:** Wired S3 storage for user uploads and generated artifacts (plots/tables).
+
+**Changes:**
+- **File uploads**: Modified `file_upload_widget()` to upload .h5ad files to S3 while keeping local copy for immediate loading
+- **Artifact storage**: Updated `DatabaseLogger.log_artifacts()` to upload plots (PNG) and tables (CSV) to S3
+- **Database schema**: Added `s3_key` column to `message_artifacts` table via migration
+- **Fallback behavior**: System gracefully falls back to local storage if S3 is unavailable
+
+**S3 key structure:**
+```
+users/{user_id}/sessions/{session_id}/
+  ├── uploads/{filename}.h5ad
+  └── results/
+      ├── plot/plot_{message_id}_{idx}.png
+      └── table/table_{message_id}_{idx}.csv
+```
+
+**Files modified:**
+- `.env` — added `AWS_REGION` and `S3_BUCKET_NAME`
+- `src/ui/components.py` — `file_upload_widget()` now returns `(path, s3_key)` and uploads to S3
+- `src/ui/app.py` — updated to handle new upload signature and generate session_id early
+- `src/db/logger.py` — `log_artifacts()` uploads plots/tables to S3 and stores s3_key
+
+**New files:**
+- `migrations/001_add_s3_key_to_artifacts.sql` — migration to add s3_key column
+- `scripts/run_migration.py` — Python migration runner
+- `scripts/migrate_db.sh` — shell script to run migrations
+- `docs/S3_INTEGRATION.md` — S3 integration documentation
+
+**Migration required:**
+```bash
+bash scripts/migrate_db.sh
+```
+
+---
+
+### 2. Verified DB Logging Live on EC2
 
 **Context:** Confirmed all 5 RDS tables have live data after real user interactions.
 

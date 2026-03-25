@@ -130,7 +130,13 @@ with st.sidebar:
         st.rerun()
 
 api_key = os.environ.get("OPENAI_API_KEY", "")
-uploaded_path = file_upload_widget()
+
+# Generate session_id early for S3 upload
+if "session_id" not in st.session_state:
+    import uuid
+    st.session_state.session_id = str(uuid.uuid4())
+
+uploaded_path, s3_key = file_upload_widget(user.user_id, st.session_state.session_id)
 
 
 # ---------------------------------------------------------------------------
@@ -163,15 +169,11 @@ if need_reload:
     adata = load_uploaded(str(uploaded_path))
     ds_state = detect_dataset_state(adata, source="upload", filename=uploaded_path.name)
 
-    # Create new session for this dataset
-    import uuid
-    session_id = str(uuid.uuid4())
-
     # Try to create session (respects concurrency limits)
     session = session_manager.create_session(
         user_id=user.user_id,
-        session_id=session_id,
-        dataset_s3_key=f"users/{user.user_id}/sessions/{session_id}/uploads/{uploaded_path.name}"
+        session_id=st.session_state.session_id,
+        dataset_s3_key=s3_key or f"users/{user.user_id}/sessions/{st.session_state.session_id}/uploads/{uploaded_path.name}"
     )
 
     if session is None:
@@ -181,10 +183,9 @@ if need_reload:
     st.session_state.adata = adata
     st.session_state.ds_state = ds_state
     st.session_state._dataset_filename = current_filename
-    st.session_state.session_id = session_id
     st.session_state.messages = []
     st.session_state.chat_history = []
-    logger.info(f"New session created: {session_id} for user: {user.user_id}")
+    logger.info(f"New session created: {st.session_state.session_id} for user: {user.user_id}")
 
 # Use session state adata (may have been replaced by preprocessing)
 adata = st.session_state.adata

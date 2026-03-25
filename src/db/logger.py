@@ -182,33 +182,67 @@ class DatabaseLogger:
     ) -> None:
         """Persist plots and tables linked to an assistant message."""
         import base64
+        import os
+
+        # Initialize S3 service if configured
+        s3_service = None
+        if os.getenv("S3_BUCKET_NAME"):
+            try:
+                from src.storage.service import S3StorageService
+                s3_service = S3StorageService(
+                    bucket_name=os.getenv("S3_BUCKET_NAME"),
+                    region=os.getenv("AWS_REGION", "us-east-2")
+                )
+            except Exception as e:
+                logger.warning(f"S3 service unavailable: {e}")
+
         try:
             with get_conn() as conn:
                 if conn is None:
                     return
                 with conn.cursor() as cur:
-                    for pr in plot_results:
+                    for idx, pr in enumerate(plot_results):
                         image_b64 = base64.b64encode(pr.image).decode("utf-8")
+
+                        # Upload to S3 if available
+                        s3_key = None
+                        if s3_service:
+                            try:
+                                filename = f"plot_{message_id}_{idx}.png"
+                                s3_key = s3_service.upload_result(user_id, session_id, "plot", pr.image, filename)
+                            except Exception as e:
+                                logger.warning(f"S3 plot upload failed: {e}")
+
                         cur.execute(
                             """
                             INSERT INTO message_artifacts
                                 (message_id, session_id, user_id, artifact_type,
-                                 title, image_b64, code)
-                            VALUES (%s, %s, %s, 'plot', %s, %s, %s)
+                                 title, image_b64, code, s3_key)
+                            VALUES (%s, %s, %s, 'plot', %s, %s, %s, %s)
                             """,
                             (message_id, session_id, user_id,
-                             pr.message[:200], image_b64, pr.code),
+                             pr.message[:200], image_b64, pr.code, s3_key),
                         )
-                    for tr in table_results:
+
+                    for idx, tr in enumerate(table_results):
+                        # Upload to S3 if available
+                        s3_key = None
+                        if s3_service:
+                            try:
+                                filename = f"table_{message_id}_{idx}.csv"
+                                s3_key = s3_service.upload_result(user_id, session_id, "table", tr.csv_data.encode('utf-8'), filename)
+                            except Exception as e:
+                                logger.warning(f"S3 table upload failed: {e}")
+
                         cur.execute(
                             """
                             INSERT INTO message_artifacts
                                 (message_id, session_id, user_id, artifact_type,
-                                 title, csv_data, display_df, code)
-                            VALUES (%s, %s, %s, 'table', %s, %s, %s, %s)
+                                 title, csv_data, display_df, code, s3_key)
+                            VALUES (%s, %s, %s, 'table', %s, %s, %s, %s, %s)
                             """,
                             (message_id, session_id, user_id,
-                             tr.message[:200], tr.csv_data, tr.display_df, tr.code),
+                             tr.message[:200], tr.csv_data, tr.display_df, tr.code, s3_key),
                         )
         except Exception as e:
             logger.error("DB log_artifacts failed: %s", e)
