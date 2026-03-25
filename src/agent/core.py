@@ -231,6 +231,27 @@ class AgentRunner:
                 tool_called=tool_called
             )
 
+        # Log assistant response (always, even if empty)
+        if self._db_logger and self._user_id and self._session_id:
+            msg_id = self._db_logger.log_assistant_message(
+                user_id=self._user_id,
+                session_id=self._session_id,
+                message=final_text or "(no text response)",
+            )
+            # Persist any plots/tables generated this turn
+            if msg_id is not None:
+                from src.agent.tools import get_plot_results, get_table_results
+                plots = get_plot_results()
+                tables = get_table_results()
+                logger.info("Artifact logging: msg_id=%s plots=%d tables=%d", msg_id, len(plots), len(tables))
+                self._db_logger.log_artifacts(
+                    message_id=msg_id,
+                    session_id=self._session_id,
+                    user_id=self._user_id,
+                    plot_results=plots,
+                    table_results=tables,
+                )
+
         # Log token usage
         if self._event_logger and self._user_id and self._session_id and total_tokens > 0:
             self._event_logger.log_token_usage(

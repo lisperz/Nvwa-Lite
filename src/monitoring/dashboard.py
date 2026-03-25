@@ -208,6 +208,34 @@ with tab_users:
                                 st.write(m["content"])
                                 if m.get("response_ms"):
                                     st.caption(f"{m['response_ms']:.0f} ms")
+
+                                # Render artifacts (plots, tables, code) in foldable expanders
+                                artifacts = m.get("artifacts", [])
+                                for i, art in enumerate(artifacts):
+                                    atype = art["artifact_type"]
+                                    title = art.get("title") or f"{atype} {i + 1}"
+                                    label = f"{'📊' if atype == 'plot' else '📋'} {title[:80]}"
+
+                                    with st.expander(label, expanded=False):
+                                        if art.get("code"):
+                                            st.code(art["code"], language="python")
+
+                                        if atype == "plot" and art.get("image_b64"):
+                                            import base64, io
+                                            img_bytes = base64.b64decode(art["image_b64"])
+                                            st.image(io.BytesIO(img_bytes), use_container_width=True)
+
+                                        elif atype == "table":
+                                            if art.get("display_df"):
+                                                st.markdown(art["display_df"])
+                                            if art.get("csv_data"):
+                                                st.download_button(
+                                                    label="📥 Download CSV",
+                                                    data=art["csv_data"],
+                                                    file_name=f"nvwa_export_{chosen[:8]}_{i}.csv",
+                                                    mime="text/csv",
+                                                    key=f"dl_{chosen}_{m['id']}_{i}",
+                                                )
                     else:
                         st.info("No messages recorded for this session.")
 
@@ -281,7 +309,7 @@ with tab_sessions:
         st.info("No sessions started in this time window.")
     else:
         df_s = pd.DataFrame(sessions)
-        df_s["started_at"] = pd.to_datetime(df_s["started_at"]).dt.strftime(
+        df_s["created_at"] = pd.to_datetime(df_s["created_at"]).dt.strftime(
             "%Y-%m-%d %H:%M"
         )
         df_s["duration"] = df_s["duration_seconds"].apply(
@@ -291,14 +319,14 @@ with tab_sessions:
         st.dataframe(
             df_s[
                 [
-                    "started_at", "user_id", "filename",
+                    "created_at", "user_id", "filename",
                     "message_count", "duration", "status",
                 ]
             ],
             use_container_width=True,
             hide_index=True,
             column_config={
-                "started_at": "Started",
+                "created_at": "Started",
                 "user_id": "User",
                 "filename": "Dataset",
                 "message_count": st.column_config.NumberColumn("Messages"),

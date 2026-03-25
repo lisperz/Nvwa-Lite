@@ -172,13 +172,13 @@ def get_recent_sessions(hours: int = 24, limit: int = 50) -> list[dict[str, Any]
             s.filename,
             s.status,
             s.message_count,
-            s.started_at,
+            s.created_at,
             s.ended_at,
-            EXTRACT(EPOCH FROM (COALESCE(s.ended_at, NOW()) - s.started_at))::int
+            EXTRACT(EPOCH FROM (COALESCE(s.ended_at, NOW()) - s.created_at))::int
                 AS duration_seconds
         FROM analysis_sessions s
-        WHERE s.started_at >= NOW() - INTERVAL '%s hours'
-        ORDER BY s.started_at DESC
+        WHERE s.created_at >= NOW() - INTERVAL '%s hours'
+        ORDER BY s.created_at DESC
         LIMIT %s
         """,
         (hours, limit),
@@ -186,16 +186,42 @@ def get_recent_sessions(hours: int = 24, limit: int = 50) -> list[dict[str, Any]
 
 
 def get_session_messages(session_id: str) -> list[dict[str, Any]]:
-    """All chat messages for a specific session."""
-    return _query(
+    """All chat messages for a specific session, with artifacts."""
+    messages = _query(
         """
-        SELECT role, content, tool_called, response_ms, created_at
+        SELECT id, role, content, tool_called, response_ms, created_at
         FROM chat_messages
         WHERE session_id = %s
         ORDER BY created_at
         """,
         (session_id,),
     )
+    if not messages:
+        return []
+
+    # Attach artifacts to each message
+    msg_ids = [m["id"] for m in messages]
+    placeholders = ",".join(["%s"] * len(msg_ids))
+    artifacts = _query(
+        f"""
+        SELECT message_id, artifact_type, title, image_b64, csv_data, display_df, code
+        FROM message_artifacts
+        WHERE message_id IN ({placeholders})
+        ORDER BY id
+        """,
+        tuple(msg_ids),
+    )
+
+    # Group artifacts by message_id
+    from collections import defaultdict
+    art_by_msg: dict[int, list] = defaultdict(list)
+    for a in artifacts:
+        art_by_msg[a["message_id"]].append(a)
+
+    for m in messages:
+        m["artifacts"] = art_by_msg.get(m["id"], [])
+
+    return messages
 
 
 # ---------------------------------------------------------------------------

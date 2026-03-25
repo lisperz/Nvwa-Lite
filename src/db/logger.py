@@ -142,6 +142,77 @@ class DatabaseLogger:
         except Exception as e:
             logger.error("DB log_user_message failed: %s", e)
 
+    def log_assistant_message(
+        self,
+        user_id: str,
+        session_id: str,
+        message: str,
+    ) -> int | None:
+        """Persist assistant response to chat_messages. Returns the new row id."""
+        try:
+            with get_conn() as conn:
+                if conn is None:
+                    return None
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        INSERT INTO chat_messages
+                            (session_id, user_id, role, content, tool_called, response_ms)
+                        VALUES (%s, %s, 'assistant', %s, false, null)
+                        RETURNING id
+                        """,
+                        (
+                            session_id,
+                            user_id,
+                            message[:2000] if len(message) > 2000 else message,
+                        ),
+                    )
+                    return cur.fetchone()[0]
+        except Exception as e:
+            logger.error("DB log_assistant_message failed: %s", e)
+            return None
+
+    def log_artifacts(
+        self,
+        message_id: int,
+        session_id: str,
+        user_id: str,
+        plot_results: list,
+        table_results: list,
+    ) -> None:
+        """Persist plots and tables linked to an assistant message."""
+        import base64
+        try:
+            with get_conn() as conn:
+                if conn is None:
+                    return
+                with conn.cursor() as cur:
+                    for pr in plot_results:
+                        image_b64 = base64.b64encode(pr.image).decode("utf-8")
+                        cur.execute(
+                            """
+                            INSERT INTO message_artifacts
+                                (message_id, session_id, user_id, artifact_type,
+                                 title, image_b64, code)
+                            VALUES (%s, %s, %s, 'plot', %s, %s, %s)
+                            """,
+                            (message_id, session_id, user_id,
+                             pr.message[:200], image_b64, pr.code),
+                        )
+                    for tr in table_results:
+                        cur.execute(
+                            """
+                            INSERT INTO message_artifacts
+                                (message_id, session_id, user_id, artifact_type,
+                                 title, csv_data, display_df, code)
+                            VALUES (%s, %s, %s, 'table', %s, %s, %s, %s)
+                            """,
+                            (message_id, session_id, user_id,
+                             tr.message[:200], tr.csv_data, tr.display_df, tr.code),
+                        )
+        except Exception as e:
+            logger.error("DB log_artifacts failed: %s", e)
+
     # ------------------------------------------------------------------
     # Token usage
     # ------------------------------------------------------------------
