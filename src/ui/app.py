@@ -21,7 +21,7 @@ import anndata as ad
 import streamlit as st
 
 from src.agent.core import create_agent
-from src.agent.tools import clear_plot_results, clear_table_results, get_plot_results, get_table_results, set_adata_replaced_callback
+from src.agent.tools import clear_plot_results, clear_table_results, get_plot_results, get_table_results, set_adata_replaced_callback, set_plot_generated_callback
 from src.auth.service import AuthService
 from src.plotting.styles import configure_plot_style
 from src.session.manager import SessionManager
@@ -31,6 +31,9 @@ from src.ui.components import (
     file_upload_widget,
     pipeline_panel,
 )
+from src.ui.feedback_dialog import show_feedback_dialog
+from src.ui.feedback_trigger import init_feedback_timer, mark_plot_generated, check_feedback_timer
+from src.db.logger import DatabaseLogger
 
 # ---------------------------------------------------------------------------
 # Logging setup
@@ -70,7 +73,26 @@ def get_auth_service():
 @st.cache_resource
 def get_session_manager():
     """Get cached session manager."""
-    return SessionManager()
+    import redis
+
+    redis_host = os.environ.get("REDIS_HOST", "localhost")
+    redis_port = int(os.environ.get("REDIS_PORT", "6379"))
+    max_concurrent = int(os.environ.get("MAX_CONCURRENT_SESSIONS", "20"))
+    max_per_user = int(os.environ.get("MAX_SESSIONS_PER_USER", "2"))
+    timeout_mins = int(os.environ.get("SESSION_TIMEOUT_MINUTES", "30"))
+
+    try:
+        redis_client = redis.Redis(host=redis_host, port=redis_port, decode_responses=True)
+        redis_client.ping()
+    except (redis.ConnectionError, redis.TimeoutError):
+        redis_client = None
+
+    return SessionManager(
+        redis_client=redis_client,
+        max_concurrent_sessions=max_concurrent,
+        max_sessions_per_user=max_per_user,
+        session_timeout_minutes=timeout_mins,
+    )
 
 auth_service = get_auth_service()
 session_manager = get_session_manager()
@@ -185,6 +207,8 @@ if need_reload:
     st.session_state._dataset_filename = current_filename
     st.session_state.messages = []
     st.session_state.chat_history = []
+    st.session_state.plot_generated = False
+    st.session_state.feedback_submitted = False
     logger.info(f"New session created: {st.session_state.session_id} for user: {user.user_id}")
 
 # Use session state adata (may have been replaced by preprocessing)
@@ -203,7 +227,14 @@ def _on_adata_replaced(new_adata) -> None:
     )
 
 
+def _on_plot_generated() -> None:
+    """Callback when any plot is generated."""
+    st.session_state.plot_generated = True
+    mark_plot_generated()
+
+
 set_adata_replaced_callback(_on_adata_replaced)
+set_plot_generated_callback(_on_plot_generated)
 
 
 # ---------------------------------------------------------------------------
@@ -361,3 +392,72 @@ if prompt := st.chat_input("Ask about your data... (e.g., 'Show me the UMAP plot
 
     # Trigger rerun to display the new messages
     st.rerun()
+
+
+# ---------------------------------------------------------------------------
+# Feedback Widget
+# ---------------------------------------------------------------------------
+
+# Initialize feedback state
+init_feedback_timer()
+if "plot_generated" not in st.session_state:
+    st.session_state.plot_generated = False
+if "feedback_submitted" not in st.session_state:
+    st.session_state.feedback_submitted = False
+if "feedback_skipped" not in st.session_state:
+    st.session_state.feedback_skipped = False
+if "show_feedback_dialog" not in st.session_state:
+    st.session_state.show_feedback_dialog = False
+
+# Auto-trigger feedback after 10 seconds if plot generated
+if (st.session_state.plot_generated and
+    not st.session_state.feedback_submitted and
+    "session_id" in st.session_state):
+
+    # Check timer every 2 seconds
+    check_feedback_timer(delay_seconds=10)
+
+# Show dialog if triggered
+if st.session_state.get("show_feedback_dialog", False):
+    show_feedback_dialog()
+
+# Feedback icon button (bottom left corner)
+if (st.session_state.plot_generated and
+    not st.session_state.feedback_submitted and
+    "session_id" in st.session_state):
+
+    st.markdown("""
+    <style>
+    .feedback-icon {
+        position: fixed;
+        bottom: 80px;
+        left: 20px;
+        z-index: 999;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+    with st.container():
+        st.markdown('<div class="feedback-icon">', unsafe_allow_html=True)
+        if st.button("💬 Feedback", key="feedback_icon_btn"):
+            st.session_state.show_feedback_dialog = True
+            st.rerun()
+        st.markdown('</div>', unsafe_allow_html=True)
+
+# Handle feedback submission
+if st.session_state.get("feedback_submitted", False) and st.session_state.get("feedback_data"):
+    db_logger = DatabaseLogger()
+    feedback_data = st.session_state.feedback_data
+    db_logger.log_feedback(
+        session_id=st.session_state.session_id,
+        user_id=user.user_id,
+        q1_score=feedback_data["q1_score"],
+        q2_time_saved=feedback_data["q2_time_saved"],
+        q3_open_text=feedback_data["q3_open_text"]
+    )
+    st.session_state.feedback_data = None
+    st.success("Thanks! Your feedback helps us improve.")
+    logger.info(f"Feedback submitted for session {st.session_state.session_id}")
+    st.rerun()
+
+

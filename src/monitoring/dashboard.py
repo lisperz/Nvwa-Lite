@@ -89,8 +89,8 @@ with st.sidebar:
 # Tabs
 # ---------------------------------------------------------------------------
 
-tab_overview, tab_users, tab_tools, tab_sessions = st.tabs(
-    ["📊 Overview", "👥 Users", "🔧 Tools", "📁 Sessions"]
+tab_overview, tab_users, tab_tools, tab_sessions, tab_feedback = st.tabs(
+    ["📊 Overview", "👥 Users", "🔧 Tools", "📁 Sessions", "💬 Feedback"]
 )
 
 # ============================================================
@@ -334,6 +334,47 @@ with tab_sessions:
                 "status": "Status",
             },
         )
+
+# ============================================================
+# TAB 5 — FEEDBACK
+# ============================================================
+
+with tab_feedback:
+    st.header("💬 User Feedback")
+
+    stats = analytics.get_feedback_stats(hours)
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Total Responses", int(stats["total_responses"]))
+    with col2:
+        avg_score = stats["avg_score"] or 0
+        st.metric("Average Score", f"{avg_score:.2f} / 5")
+    with col3:
+        positive = int(stats["positive_count"])
+        total = int(stats["total_responses"])
+        pct = (positive / total * 100) if total > 0 else 0
+        st.metric("Positive (4-5★)", f"{positive} ({pct:.0f}%)")
+
+    st.divider()
+
+    feedback = analytics.get_feedback_responses(hours)
+    if feedback:
+        df = pd.DataFrame(feedback)
+        st.dataframe(
+            df,
+            use_container_width=True,
+            column_config={
+                "response_id": "ID",
+                "created_at": "Date",
+                "user_id": "User",
+                "session_id": "Session",
+                "q1_score": st.column_config.NumberColumn("Score", format="%d ⭐"),
+                "q2_time_saved": "Time Saved",
+                "q3_open_text": "Comments",
+            },
+        )
+    else:
+        st.info("No feedback responses in this time window.")
 
 # ---------------------------------------------------------------------------
 # Auto-refresh

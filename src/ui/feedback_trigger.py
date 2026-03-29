@@ -1,0 +1,36 @@
+"""Timer-based feedback trigger using Streamlit fragments."""
+
+import streamlit as st
+from datetime import datetime
+
+
+def init_feedback_timer():
+    """Initialize feedback timer state."""
+    if "feedback_plot_time" not in st.session_state:
+        st.session_state.feedback_plot_time = None
+    if "feedback_timer_checked" not in st.session_state:
+        st.session_state.feedback_timer_checked = False
+
+
+def mark_plot_generated():
+    """Mark that a plot was just generated."""
+    st.session_state.feedback_plot_time = datetime.now()
+    st.session_state.feedback_timer_checked = False
+
+
+@st.fragment(run_every=2)
+def check_feedback_timer(delay_seconds: int = 10):
+    """Check if feedback should be shown (runs every 2 seconds)."""
+
+    # Don't check if already triggered or no plot generated
+    if st.session_state.feedback_timer_checked or st.session_state.feedback_plot_time is None:
+        return
+
+    # Calculate elapsed time
+    elapsed = (datetime.now() - st.session_state.feedback_plot_time).total_seconds()
+
+    # Trigger feedback if enough time has passed
+    if elapsed >= delay_seconds:
+        st.session_state.feedback_timer_checked = True
+        st.session_state.show_feedback_dialog = True
+        st.rerun()

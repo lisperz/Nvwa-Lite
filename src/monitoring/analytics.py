@@ -269,3 +269,43 @@ def get_recent_errors(hours: int = 24, limit: int = 20) -> list[dict[str, Any]]:
         """,
         (hours, limit),
     )
+
+
+# ---------------------------------------------------------------------------
+# Feedback responses
+# ---------------------------------------------------------------------------
+
+def get_feedback_responses(hours: int = 24) -> list[dict[str, Any]]:
+    """Get all feedback responses within time window."""
+    return _query(
+        """
+        SELECT
+            response_id,
+            session_id,
+            user_id,
+            q1_score,
+            q2_time_saved,
+            q3_open_text,
+            created_at
+        FROM feedback_responses
+        WHERE created_at >= NOW() - INTERVAL '%s hours'
+        ORDER BY created_at DESC
+        """,
+        (hours,),
+    )
+
+
+def get_feedback_stats(hours: int = 24) -> dict[str, Any]:
+    """Get feedback statistics."""
+    rows = _query(
+        """
+        SELECT
+            COUNT(*) as total_responses,
+            AVG(q1_score) as avg_score,
+            COUNT(CASE WHEN q1_score >= 4 THEN 1 END) as positive_count
+        FROM feedback_responses
+        WHERE created_at >= NOW() - INTERVAL '%s hours'
+        """,
+        (hours,),
+    )
+    return rows[0] if rows else {"total_responses": 0, "avg_score": 0, "positive_count": 0}

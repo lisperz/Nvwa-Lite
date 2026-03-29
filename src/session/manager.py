@@ -57,14 +57,16 @@ class SessionManager:
     def __init__(
         self,
         redis_client: redis.Redis | None = None,
-        max_concurrent_sessions: int = 2,
+        max_concurrent_sessions: int = 20,
+        max_sessions_per_user: int = 2,
         session_timeout_minutes: int = 30,
     ):
         """Initialize the session manager.
 
         Args:
             redis_client: Redis client for state storage. If None, uses in-memory fallback.
-            max_concurrent_sessions: Maximum concurrent sessions (default 2).
+            max_concurrent_sessions: Maximum concurrent sessions system-wide (default 20).
+            max_sessions_per_user: Maximum sessions per user (default 2).
             session_timeout_minutes: Session timeout in minutes (default 30).
         """
         if redis_client is None and REDIS_AVAILABLE:
@@ -81,6 +83,7 @@ class SessionManager:
 
         self.redis = redis_client
         self.max_concurrent_sessions = max_concurrent_sessions
+        self.max_sessions_per_user = max_sessions_per_user
         self.session_timeout_minutes = session_timeout_minutes
 
         # Fallback in-memory storage if Redis unavailable
@@ -106,8 +109,9 @@ class SessionManager:
             Session object if created, None if limits exceeded.
         """
         # Check user's active sessions
-        if self._has_active_session(user_id):
-            return None  # User already has an active session
+        user_session_count = self._get_user_session_count(user_id)
+        if user_session_count >= self.max_sessions_per_user:
+            return None  # User at session limit
 
         # Check system-wide concurrency
         active_count = self._get_active_count()
@@ -243,12 +247,20 @@ class SessionManager:
 
     def _has_active_session(self, user_id: str) -> bool:
         """Check if user has an active session."""
+        return self._get_user_session_count(user_id) > 0
+
+    def _get_user_session_count(self, user_id: str) -> int:
+        """Get number of active sessions for a user."""
         if self.redis:
             user_sessions_key = f"user:{user_id}:sessions"
-            active_sessions = self.redis.smembers(user_sessions_key)
-            return len(active_sessions) > 0
+            # Clean up orphaned session IDs
+            session_ids = self.redis.smembers(user_sessions_key)
+            for session_id in session_ids:
+                if not self.redis.exists(f"session:{session_id}"):
+                    self.redis.srem(user_sessions_key, session_id)
+            return self.redis.scard(user_sessions_key)
         else:
-            return user_id in self._memory_user_sessions and len(self._memory_user_sessions[user_id]) > 0
+            return len(self._memory_user_sessions.get(user_id, set()))
 
     def _get_active_count(self) -> int:
         """Get current number of active sessions."""
