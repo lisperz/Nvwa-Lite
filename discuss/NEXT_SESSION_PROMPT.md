@@ -50,10 +50,10 @@
 - `src/db/logger.py` — added `log_feedback()` method
 
 **Status:**
-- ✅ Feedback dialog appears after 10 seconds in production
+- ✅ Feedback dialog appears after 5 minutes in production
 - ✅ Feedback submission works and saves to RDS
 - ✅ Fragment auto-rerun works with proper WebSocket configuration
-- ⏳ Change timer to 10 minutes for production (currently 10 seconds for testing)
+- ✅ Timer set to 5 minutes (300 seconds) as requested for production use
 
 ---
 
