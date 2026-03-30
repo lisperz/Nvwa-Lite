@@ -248,6 +248,36 @@ class DatabaseLogger:
             logger.error("DB log_artifacts failed: %s", e)
 
     # ------------------------------------------------------------------
+    # Feedback
+    # ------------------------------------------------------------------
+
+    def log_feedback(
+        self,
+        session_id: str,
+        user_id: str,
+        q1_score: int,
+        q2_time_saved: str,
+        q3_open_text: str | None = None,
+    ) -> None:
+        """Persist user feedback response."""
+        try:
+            with get_conn() as conn:
+                if conn is None:
+                    return
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        INSERT INTO feedback_responses
+                            (session_id, user_id, q1_score, q2_time_saved, q3_open_text)
+                        VALUES (%s, %s, %s, %s, %s)
+                        """,
+                        (session_id, user_id, q1_score, q2_time_saved, q3_open_text),
+                    )
+        except Exception as e:
+            logger.error("DB log_feedback failed: %s", e)
+
+
+    # ------------------------------------------------------------------
     # Token usage
     # ------------------------------------------------------------------
 
