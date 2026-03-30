@@ -415,7 +415,7 @@ if (st.session_state.plot_generated and
     "session_id" in st.session_state):
 
     # Check timer every 2 seconds
-    check_feedback_timer(delay_seconds=600)
+    check_feedback_timer(delay_seconds=10)
 
 # Show dialog if triggered
 if st.session_state.get("show_feedback_dialog", False):
