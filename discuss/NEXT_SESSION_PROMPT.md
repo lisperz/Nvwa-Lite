@@ -1,6 +1,63 @@
-# Session Summary — 2026-03-29 (Latest Update)
+# Session Summary — 2026-03-30 (Latest Update)
 
-## Recent Changes This Session (2026-03-29)
+## Recent Changes This Session (2026-03-30)
+
+### 1. Fixed nginx Upload Limit for .h5ad Files ✅ DEPLOYED
+
+**Root cause:** nginx `client_max_body_size` defaulted to 1 MB, blocking any `.h5ad` file > 1 MB at the proxy layer (413 error), causing browser uploads to hang indefinitely (red dot in Streamlit sidebar).
+
+**Fix:**
+- Rewrote `nginx/landing_ssl.conf` with complete production configuration:
+  - `client_max_body_size 2000m;` — allows 2 GB file uploads
+  - Added WebSocket upgrade map: `map $http_upgrade $connection_upgrade`
+  - `/app` proxy block with WebSocket headers, 3600s timeouts, `proxy_buffering off`, `proxy_request_buffering off`, `proxy_socket_keepalive on`
+  - `/admin` proxy block with WebSocket headers, 300s timeouts
+- Created `scripts/update_nginx.sh` — pushes config to EC2 and reloads nginx (no downtime)
+- Created `scripts/db_tunnel.sh` — SSH tunnel script for local RDS access on port 5433
+
+**Files modified:**
+- `nginx/landing_ssl.conf` — complete rewrite with WebSocket support
+- `scripts/update_nginx.sh` — nginx deployment script
+- `scripts/db_tunnel.sh` — RDS SSH tunnel script
+
+**Deployment:** ✅ Deployed to EC2, file uploads now work up to 2 GB
+
+---
+
+### 2. Fixed Feedback Widget for Production ✅ DEPLOYED & WORKING
+
+**Root cause:** Feedback timer worked locally but not in production. Multiple issues:
+1. **WebSocket connections dropping** — nginx was timing out idle WebSocket connections after 600s, preventing `st.fragment(run_every=2)` from auto-rerunning
+2. **Missing callback invocation** — `_on_plot_generated()` callback wasn't being called when plots were generated
+3. **Missing `log_feedback()` method** — DatabaseLogger was missing the feedback logging method, causing AttributeError on submission
+
+**Fix:**
+- Updated nginx WebSocket configuration:
+  - Increased `proxy_read_timeout` and `proxy_send_timeout` to 3600s (1 hour)
+  - Added `proxy_socket_keepalive on` to prevent idle connection drops
+  - Changed `Connection` header from hardcoded `"upgrade"` to dynamic `$connection_upgrade` variable
+- Added debug logging to trace callback flow:
+  - `src/ui/feedback_trigger.py` — logs fragment execution, timer checks, and dialog triggers
+  - `src/agent/tools.py` — logs callback invocation in `_store_and_return()`
+- Added missing `log_feedback()` method to `DatabaseLogger`:
+  - Inserts feedback responses into `feedback_responses` table
+  - Handles q1_score (1-5 stars), q2_time_saved (4 options), q3_open_text (optional)
+
+**Files modified:**
+- `nginx/landing_ssl.conf` — WebSocket keepalive configuration
+- `src/ui/feedback_trigger.py` — added debug logging
+- `src/agent/tools.py` — added callback logging
+- `src/db/logger.py` — added `log_feedback()` method
+
+**Status:**
+- ✅ Feedback dialog appears after 10 seconds in production
+- ✅ Feedback submission works and saves to RDS
+- ✅ Fragment auto-rerun works with proper WebSocket configuration
+- ⏳ Change timer to 10 minutes for production (currently 10 seconds for testing)
+
+---
+
+## Previous Session Changes (2026-03-29)
 
 ### 1. Feedback Widget - Auto-Popup & Local Testing ✅ COMPLETED
 
@@ -390,6 +447,29 @@ CREATE TABLE message_artifacts (
 
 ### High Priority
 1. **Change admin password** — Replace default `NvwaAdmin2026Secure` with something personal
+
+---
+
+## Recent Changes (2026-03-30)
+
+### Fix: .h5ad Upload Stuck on Red Dot ✅ DEPLOYED
+
+**Root cause:** nginx `client_max_body_size` defaulted to 1 MB. Any `.h5ad` file > 1 MB was rejected at the nginx proxy layer (413 error), causing the browser upload to hang indefinitely (red dot in Streamlit sidebar). The Streamlit limit was already 2000 MB but nginx blocked it first.
+
+**Secondary issue:** `landing_ssl.conf` in repo was missing the `/app` and `/admin` proxy blocks (they had been added manually on EC2 and drifted out of sync).
+
+**Fix:**
+- Rewrote `nginx/landing_ssl.conf` with complete config:
+  - `client_max_body_size 2000m;` — allows 2 GB file uploads
+  - `/app` proxy block with WebSocket headers, 600s timeouts, `proxy_buffering off`, `proxy_request_buffering off`
+  - `/admin` proxy block with WebSocket headers, 300s timeouts
+- Created `scripts/update_nginx.sh` — pushes config to EC2 and reloads nginx (no downtime)
+
+**Files modified:**
+- `nginx/landing_ssl.conf` — complete rewrite
+- `scripts/update_nginx.sh` — new deploy script
+
+**Deployment:** ✅ Deployed to EC2 via `bash scripts/update_nginx.sh`
 
 ### Medium Priority
 1. **Narrow IAM S3 policy** — Replace `AmazonS3FullAccess` with scoped JSON policy on `nvwa-ec2-role`
