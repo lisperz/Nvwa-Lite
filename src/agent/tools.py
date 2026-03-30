@@ -33,6 +33,7 @@ _dataset_state: DatasetState | None = None
 _plot_results: list[PlotResult] = []
 _table_results: list[TableResult] = []
 _adata_replaced_callback: Callable[[AnnData], None] | None = None
+_plot_generated_callback: Callable[[], None] | None = None
 
 
 def bind_dataset(adata: AnnData) -> None:
@@ -53,6 +54,12 @@ def set_adata_replaced_callback(cb: Callable[[AnnData], None]) -> None:
     """Register a callback invoked when preprocessing replaces adata."""
     global _adata_replaced_callback  # noqa: PLW0603
     _adata_replaced_callback = cb
+
+
+def set_plot_generated_callback(cb: Callable[[], None]) -> None:
+    """Register a callback invoked when any plot is generated."""
+    global _plot_generated_callback  # noqa: PLW0603
+    _plot_generated_callback = cb
 
 
 def _get_adata() -> AnnData:
@@ -88,6 +95,12 @@ def _update_state() -> None:
 def _store_and_return(result: PlotResult) -> str:
     """Append a PlotResult to the buffer and return a text summary."""
     _plot_results.append(result)
+    logger.info(f"[FEEDBACK] _store_and_return called, callback exists: {_plot_generated_callback is not None}")
+    if _plot_generated_callback:
+        logger.info("[FEEDBACK] Invoking plot generated callback")
+        _plot_generated_callback()
+    else:
+        logger.warning("[FEEDBACK] No plot generated callback registered!")
     return f"Plot generated successfully.\nCode: {result.code}\n{result.message}"
 
 
