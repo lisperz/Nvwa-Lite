@@ -1,7 +1,6 @@
-"""Timer-based feedback trigger using JavaScript timer."""
+"""Timer-based feedback trigger using Streamlit fragments."""
 
 import streamlit as st
-import streamlit.components.v1 as components
 from datetime import datetime
 
 
@@ -19,12 +18,10 @@ def mark_plot_generated():
     st.session_state.feedback_timer_checked = False
 
 
+@st.fragment(run_every=2)
 def check_feedback_timer(delay_seconds: int = 10):
-    """Check if feedback should be shown using JavaScript timer.
+    """Check if feedback should be shown (runs every 2 seconds)."""
 
-    This approach uses a JavaScript setTimeout to trigger a page reload
-    after the specified delay, which works reliably in production.
-    """
     # Don't check if already triggered or no plot generated
     if st.session_state.feedback_timer_checked or st.session_state.feedback_plot_time is None:
         return
@@ -32,23 +29,8 @@ def check_feedback_timer(delay_seconds: int = 10):
     # Calculate elapsed time
     elapsed = (datetime.now() - st.session_state.feedback_plot_time).total_seconds()
 
-    # If enough time has passed, trigger feedback dialog
+    # Trigger feedback if enough time has passed
     if elapsed >= delay_seconds:
         st.session_state.feedback_timer_checked = True
         st.session_state.show_feedback_dialog = True
         st.rerun()
-    else:
-        # Not enough time yet - inject JavaScript timer to reload page after remaining time
-        remaining_ms = int((delay_seconds - elapsed) * 1000)
-
-        # Use JavaScript setTimeout to trigger page reload
-        components.html(
-            f"""
-            <script>
-                setTimeout(function() {{
-                    window.parent.location.reload();
-                }}, {remaining_ms});
-            </script>
-            """,
-            height=0,
-        )
