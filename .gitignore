@@ -28,3 +28,4 @@ discuss/
 # Pilot tokens (contains sensitive authentication data)
 pilot_tokens.json
 pilot_tokens.env
+reports/*.md
