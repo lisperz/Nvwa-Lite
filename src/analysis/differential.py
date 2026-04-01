@@ -198,6 +198,12 @@ def get_de_dataframe(adata: AnnData, group: str) -> pd.DataFrame:
             f"Group '{group}' not in DE results. Available: {', '.join(groups)}"
         )
 
+    if "logfoldchanges" not in result:
+        raise ValueError(
+            "DE results do not contain log2 fold changes. "
+            "Re-run differential_expression() to generate updated results."
+        )
+
     return pd.DataFrame({
         "gene": result["names"][group],
         "log2fc": result["logfoldchanges"][group],
