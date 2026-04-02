@@ -4,7 +4,8 @@ In-process regression test runner for nvwa-mvp scRNA visualization.
 
 Loads each test case from tests/tests.yaml, invokes the agent directly
 (no HTTP, no server), checks must_contain / must_not_contain rules against
-the final response text, and writes a markdown report.
+the final response text, validates actual artifacts (PNG bytes, CSV rows),
+and writes a markdown report.
 
 Usage
 -----
@@ -24,14 +25,19 @@ import os
 import sys
 import time
 import traceback
+import warnings
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-import warnings
-
 import yaml
+
+# Suppress noisy-but-harmless warnings from scanpy internals and anndata.
+# PerformanceWarning fires during rank_genes_groups on fragmented DataFrames;
+# it is a scanpy internal issue and does not affect correctness.
+warnings.filterwarnings("ignore", message="DataFrame is highly fragmented")
+warnings.filterwarnings("ignore", category=FutureWarning, module="anndata")
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
 
@@ -58,9 +64,18 @@ def _check_deps() -> None:
             file=sys.stderr,
         )
         sys.exit(2)
+
+
 DEFAULT_CONFIG = REPO_ROOT / "tests" / "tests.yaml"
 DEFAULT_REPORT_DIR = REPO_ROOT / "reports"
 DEFAULT_MODEL = "gpt-4o-mini"
+
+# PNG file signature — first 4 bytes of any valid PNG
+PNG_MAGIC = b"\x89PNG"
+# A real matplotlib plot at 150 dpi is always well above 5 KB;
+# anything smaller is a blank/empty figure.
+MIN_PLOT_BYTES = 5_000
+
 
 # ── Data model ─────────────────────────────────────────────────────────────────
 
@@ -74,19 +89,36 @@ class CaseResult:
     duration_s: float = 0.0
     final_text: str = ""
     tool_called: bool = False
+    plot_count: int = 0           # number of valid PlotResults produced
+    table_count: int = 0          # number of valid TableResults produced
     failures: list[str] = field(default_factory=list)
     notes: str = ""               # propagated from YAML + runner notes
     failure_category: str = ""    # gene_not_found | missing_key | out_of_scope | …
 
 
+# ── Artifact validators ────────────────────────────────────────────────────────
+
+def _valid_plot(p: Any) -> bool:
+    """Return True if PlotResult contains a real PNG image (not blank/empty)."""
+    return (
+        isinstance(p.image, (bytes, bytearray))
+        and p.image[:4] == PNG_MAGIC
+        and len(p.image) >= MIN_PLOT_BYTES
+    )
+
+
+def _valid_table(t: Any) -> bool:
+    """Return True if TableResult contains at least one data row beyond the header."""
+    lines = t.csv_data.strip().splitlines()
+    return len(lines) >= 2
+
+
 # ── Dataset loader ─────────────────────────────────────────────────────────────
 
-def load_adata(dataset_path: Path):
-    """Load and return an AnnData from an .h5ad file, suppressing legacy format warnings."""
+def load_adata(dataset_path: Path) -> Any:
+    """Load and return an AnnData, suppressing legacy format warnings."""
     import anndata as ad
-    with warnings.catch_warnings():
-        warnings.filterwarnings("ignore", category=FutureWarning, module="anndata")
-        return ad.read_h5ad(dataset_path)
+    return ad.read_h5ad(dataset_path)
 
 
 # ── Single-test runner ─────────────────────────────────────────────────────────
@@ -96,15 +128,20 @@ def run_one(
     dataset_path: Path,
     api_key: str,
     model: str,
-) -> tuple[str, bool]:
+) -> tuple[str, bool, list, list]:
     """
-    Load a fresh AnnData, create the agent, and invoke the prompt.
+    Load a fresh AnnData, create the agent, invoke the prompt, and collect artifacts.
 
-    Returns (final_text, tool_called).
-    Raises on hard failures (let the caller catch and mark as error).
+    Returns (final_text, tool_called, plot_results, table_results).
+    Raises on hard failures (caller catches and marks as error).
     """
     from src.agent.core import create_agent
+    from src.agent.tools import clear_plot_results, clear_table_results, get_plot_results, get_table_results
     from src.types import detect_dataset_state
+
+    # Clear artifact buffers from any previous test before loading the agent.
+    clear_plot_results()
+    clear_table_results()
 
     adata = load_adata(dataset_path)
     state = detect_dataset_state(
@@ -114,16 +151,29 @@ def run_one(
     )
     agent = create_agent(adata, api_key=api_key, model=model, dataset_state=state)
     resp = agent.invoke(tc["prompt"])
-    return resp.text, resp.tool_called
+
+    # Collect artifacts from the module-level buffers in tools.py.
+    # get_plot_results() / get_table_results() clear the buffer after reading,
+    # so each test starts with a clean slate.
+    plot_results = get_plot_results()
+    table_results = get_table_results()
+
+    return resp.text, resp.tool_called, plot_results, table_results
 
 
 # ── Assertion check ────────────────────────────────────────────────────────────
 
-def check(tc: dict[str, Any], text: str) -> list[str]:
-    """Return a list of failure strings; empty → all assertions passed."""
+def check(
+    tc: dict[str, Any],
+    text: str,
+    plot_results: list,
+    table_results: list,
+) -> list[str]:
+    """Return a list of failure strings; empty list → all assertions passed."""
     lower = text.lower()
     failures: list[str] = []
 
+    # Text-based assertions
     for phrase in tc.get("must_contain", []):
         if phrase.lower() not in lower:
             failures.append(f"must_contain: '{phrase}' not in response")
@@ -131,6 +181,21 @@ def check(tc: dict[str, Any], text: str) -> list[str]:
     for phrase in tc.get("must_not_contain", []):
         if phrase.lower() in lower:
             failures.append(f"must_not_contain: forbidden string '{phrase}' found")
+
+    # Artifact-based assertions
+    if tc.get("requires_plot"):
+        valid = [p for p in plot_results if _valid_plot(p)]
+        if not valid:
+            n = len(plot_results)
+            detail = f"{n} produced but all failed validation (empty/blank)" if n else "none produced"
+            failures.append(f"requires_plot: no valid PlotResult ({detail})")
+
+    if tc.get("requires_table"):
+        valid = [t for t in table_results if _valid_table(t)]
+        if not valid:
+            n = len(table_results)
+            detail = f"{n} produced but all failed validation (empty/no rows)" if n else "none produced"
+            failures.append(f"requires_table: no valid TableResult ({detail})")
 
     return failures
 
@@ -144,6 +209,8 @@ def classify_failure(result: CaseResult) -> str:
     if result.status == "skip":
         return "skipped"
     combined = " ".join(result.failures).lower() + result.final_text.lower()
+    if "requires_plot" in combined or "requires_table" in combined:
+        return "missing_artifact"
     if "gene" in combined and "not found" in combined:
         return "gene_not_found"
     if ("metadata" in combined or "obs" in combined or "key" in combined) and "not found" in combined:
@@ -156,6 +223,15 @@ def classify_failure(result: CaseResult) -> str:
 
 
 # ── Markdown report ────────────────────────────────────────────────────────────
+
+def _artifact_label(r: CaseResult) -> str:
+    parts = []
+    if r.plot_count:
+        parts.append(f"{r.plot_count} plot{'s' if r.plot_count > 1 else ''}")
+    if r.table_count:
+        parts.append(f"{r.table_count} table{'s' if r.table_count > 1 else ''}")
+    return ", ".join(parts) if parts else "none"
+
 
 def write_report(
     results: list[CaseResult],
@@ -197,8 +273,8 @@ def write_report(
         "",
         "## Per-case Results",
         "",
-        "| case_id | category | status | duration | tool_called | failure reason |",
-        "|---------|----------|--------|----------|-------------|----------------|",
+        "| case_id | category | status | duration | artifacts | failure reason |",
+        "|---------|----------|--------|----------|-----------|----------------|",
     ]
 
     for r in results:
@@ -206,7 +282,7 @@ def write_report(
         reason = "; ".join(r.failures[:2]) if r.failures else (r.notes[:60] if r.status == "skip" else "—")
         lines.append(
             f"| {r.case_id} | {r.category} | {icon} {r.status.upper()} "
-            f"| {r.duration_s:.1f}s | {'yes' if r.tool_called else 'no'} "
+            f"| {r.duration_s:.1f}s | {_artifact_label(r)} "
             f"| {reason} |"
         )
 
@@ -248,7 +324,7 @@ def write_report(
             f"- **Expected status:** {r.expected_status}",
             f"- **Actual status:** {r.status.upper()}",
             f"- **Duration:** {r.duration_s:.2f}s",
-            f"- **Tool called:** {'yes' if r.tool_called else 'no'}",
+            f"- **Artifacts:** {_artifact_label(r)}",
         ]
         if r.notes:
             lines.append(f"- **Notes:** {r.notes}")
@@ -369,12 +445,12 @@ def main() -> int:
     suite_start = time.monotonic()
 
     for tc in test_cases:
-        case_id        = tc["case_id"]
-        category       = tc.get("category", "unknown")
+        case_id         = tc["case_id"]
+        category        = tc.get("category", "unknown")
         expected_status = tc.get("expected_status", "PASS").upper()
-        tc_notes       = tc.get("notes", "")
+        tc_notes        = tc.get("notes", "")
 
-        # Manual / SKIP cases (WARN with no must_contain and notes say "MANUAL")
+        # Manual / SKIP cases (WARN with no must_contain and "MANUAL" in prompt)
         is_manual = (
             expected_status == "WARN"
             and not tc.get("must_contain")
@@ -393,19 +469,38 @@ def main() -> int:
 
         if is_manual:
             result.status = "skip"
-            result.notes = tc_notes
             results.append(result)
             print("SKIP (manual)")
             continue
 
+        # Pre-flight: dataset capability checks (cheap, no agent invocation).
+        if tc.get("requires_precomputed_umap"):
+            import anndata as _ad
+            _adata_check = _ad.read_h5ad(dataset_path)
+            if "X_umap" not in _adata_check.obsm:
+                result.status = "fail"
+                result.failures = [
+                    "requires_precomputed_umap: X_umap not found in dataset .obsm; "
+                    "this test requires a preprocessed dataset"
+                ]
+                result.failure_category = "missing_artifact"
+                results.append(result)
+                print(f"FAIL (0.0s) [none]")
+                print(f"         ✗ {result.failures[0]}")
+                continue
+
         t0 = time.monotonic()
         try:
-            final_text, tool_called = run_one(tc, dataset_path, args.api_key, args.model)
+            final_text, tool_called, plot_results, table_results = run_one(
+                tc, dataset_path, args.api_key, args.model
+            )
             result.duration_s = time.monotonic() - t0
             result.final_text = final_text
             result.tool_called = tool_called
+            result.plot_count = sum(1 for p in plot_results if _valid_plot(p))
+            result.table_count = sum(1 for t in table_results if _valid_table(t))
 
-            failures = check(tc, final_text)
+            failures = check(tc, final_text, plot_results, table_results)
             result.failures = failures
 
             if not failures:
@@ -427,7 +522,8 @@ def main() -> int:
 
         icon = {"pass": "PASS", "fail": "FAIL", "warn": "WARN",
                 "error": "ERROR", "skip": "SKIP"}.get(result.status, result.status)
-        print(f"{icon} ({result.duration_s:.1f}s)")
+        artifact_info = _artifact_label(result)
+        print(f"{icon} ({result.duration_s:.1f}s) [{artifact_info}]")
         for f in result.failures[:2]:
             print(f"         ✗ {f}")
 
