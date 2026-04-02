@@ -127,7 +127,8 @@ class AgentRunner:
 
         tool_called = False
         max_iterations = 5
-        total_tokens = 0
+        total_input_tokens = 0
+        total_output_tokens = 0
 
         for _ in range(max_iterations):
             response = self._llm.invoke(messages)
@@ -137,7 +138,8 @@ class AgentRunner:
             if hasattr(response, "response_metadata"):
                 usage = response.response_metadata.get("token_usage", {})
                 if usage:
-                    total_tokens += usage.get("total_tokens", 0)
+                    total_input_tokens += usage.get("prompt_tokens", 0)
+                    total_output_tokens += usage.get("completion_tokens", 0)
 
             if not response.tool_calls:
                 break
@@ -253,20 +255,21 @@ class AgentRunner:
                 )
 
         # Log token usage
+        total_tokens = total_input_tokens + total_output_tokens
         if self._event_logger and self._user_id and self._session_id and total_tokens > 0:
             self._event_logger.log_token_usage(
                 user_id=self._user_id,
                 session_id=self._session_id,
-                input_tokens=0,  # Not easily extractable from aggregated usage
-                output_tokens=total_tokens,  # Use total as output for now
+                input_tokens=total_input_tokens,
+                output_tokens=total_output_tokens,
                 model=self._llm.model_name if hasattr(self._llm, "model_name") else "gpt-4o-mini"
             )
         if self._db_logger and self._user_id and self._session_id and total_tokens > 0:
             self._db_logger.log_token_usage(
                 user_id=self._user_id,
                 session_id=self._session_id,
-                input_tokens=0,
-                output_tokens=total_tokens,
+                input_tokens=total_input_tokens,
+                output_tokens=total_output_tokens,
                 model=self._llm.model_name if hasattr(self._llm, "model_name") else "gpt-4o-mini"
             )
 

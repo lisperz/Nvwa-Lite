@@ -53,47 +53,50 @@ def _query(sql: str, params: tuple = ()) -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 def get_overview(hours: int = 24) -> dict[str, Any]:
-    """Top-level numbers for the KPI tiles."""
-    rows = _query(
+    """Top-level numbers for the KPI tiles.
+
+    Uses separate queries to avoid fan-out JOINs that inflate counts.
+    """
+    msg_rows = _query(
         """
         SELECT
-            COUNT(DISTINCT cm.user_id)                          AS active_users,
-            COUNT(DISTINCT cm.session_id)                       AS active_sessions,
-            COUNT(*)                                            AS total_messages,
-            COALESCE(SUM(te.cnt), 0)                           AS total_tool_calls,
-            COALESCE(SUM(te.errors), 0)                        AS total_errors,
-            COALESCE(SUM(tu.input_tokens), 0)                  AS input_tokens,
-            COALESCE(SUM(tu.output_tokens), 0)                 AS output_tokens
-        FROM chat_messages cm
-        LEFT JOIN (
-            SELECT session_id,
-                   COUNT(*) AS cnt,
-                   SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) AS errors
-            FROM tool_executions
-            WHERE created_at >= NOW() - INTERVAL '%s hours'
-            GROUP BY session_id
-        ) te ON te.session_id = cm.session_id
-        LEFT JOIN (
-            SELECT session_id,
-                   SUM(input_tokens) AS input_tokens,
-                   SUM(output_tokens) AS output_tokens
-            FROM token_usage
-            WHERE created_at >= NOW() - INTERVAL '%s hours'
-            GROUP BY session_id
-        ) tu ON tu.session_id = cm.session_id
-        WHERE cm.created_at >= NOW() - INTERVAL '%s hours'
+            COUNT(DISTINCT user_id)      AS active_users,
+            COUNT(DISTINCT session_id)   AS active_sessions,
+            COUNT(*)                     AS total_messages
+        FROM chat_messages
+        WHERE created_at >= NOW() - INTERVAL '%s hours'
         """,
-        (hours, hours, hours),
+        (hours,),
     )
-    if not rows:
-        return {
-            "active_users": 0, "active_sessions": 0, "total_messages": 0,
-            "total_tool_calls": 0, "total_errors": 0,
-            "input_tokens": 0, "output_tokens": 0, "estimated_cost_usd": 0.0,
-        }
-    r = rows[0]
-    r["estimated_cost_usd"] = _cost(r["input_tokens"], r["output_tokens"])
-    return r
+    tool_rows = _query(
+        """
+        SELECT
+            COUNT(*)                                             AS total_tool_calls,
+            SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END)  AS total_errors
+        FROM tool_executions
+        WHERE created_at >= NOW() - INTERVAL '%s hours'
+        """,
+        (hours,),
+    )
+    token_rows = _query(
+        """
+        SELECT
+            COALESCE(SUM(input_tokens), 0)  AS input_tokens,
+            COALESCE(SUM(output_tokens), 0) AS output_tokens
+        FROM token_usage
+        WHERE created_at >= NOW() - INTERVAL '%s hours'
+        """,
+        (hours,),
+    )
+
+    m = msg_rows[0] if msg_rows else {"active_users": 0, "active_sessions": 0, "total_messages": 0}
+    t = tool_rows[0] if tool_rows else {"total_tool_calls": 0, "total_errors": 0}
+    tk = token_rows[0] if token_rows else {"input_tokens": 0, "output_tokens": 0}
+
+    return {
+        **m, **t, **tk,
+        "estimated_cost_usd": _cost(tk["input_tokens"], tk["output_tokens"]),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -122,37 +125,45 @@ def get_hourly_activity(hours: int = 24) -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 def get_user_breakdown(hours: int = 24) -> list[dict[str, Any]]:
-    """One row per user with aggregated stats, sorted by messages desc."""
+    """One row per user with aggregated stats, sorted by messages desc.
+
+    Uses separate subqueries joined on user_id to avoid fan-out multiplication.
+    """
     return _query(
         """
         SELECT
             cm.user_id,
-            COUNT(DISTINCT cm.session_id)                       AS sessions,
-            SUM(CASE WHEN cm.role = 'user' THEN 1 ELSE 0 END)  AS messages,
-            COALESCE(SUM(te.tool_calls), 0)                    AS tool_calls,
-            COALESCE(SUM(tu.total_tokens), 0)                  AS total_tokens,
-            COALESCE(SUM(tu.input_tokens), 0)                  AS input_tokens,
-            COALESCE(SUM(tu.output_tokens), 0)                 AS output_tokens,
-            MAX(cm.created_at)                                  AS last_seen
-        FROM chat_messages cm
+            cm.sessions,
+            cm.messages,
+            COALESCE(te.tool_calls, 0)                          AS tool_calls,
+            COALESCE(tu.input_tokens, 0)                        AS input_tokens,
+            COALESCE(tu.output_tokens, 0)                       AS output_tokens,
+            COALESCE(tu.input_tokens, 0) + COALESCE(tu.output_tokens, 0) AS total_tokens,
+            cm.last_seen
+        FROM (
+            SELECT user_id,
+                   COUNT(DISTINCT session_id) AS sessions,
+                   SUM(CASE WHEN role = 'user' THEN 1 ELSE 0 END) AS messages,
+                   MAX(created_at) AS last_seen
+            FROM chat_messages
+            WHERE created_at >= NOW() - INTERVAL '%s hours'
+            GROUP BY user_id
+        ) cm
         LEFT JOIN (
-            SELECT user_id, session_id, COUNT(*) AS tool_calls
+            SELECT user_id, COUNT(*) AS tool_calls
             FROM tool_executions
             WHERE created_at >= NOW() - INTERVAL '%s hours'
-            GROUP BY user_id, session_id
-        ) te ON te.user_id = cm.user_id AND te.session_id = cm.session_id
+            GROUP BY user_id
+        ) te ON te.user_id = cm.user_id
         LEFT JOIN (
-            SELECT user_id, session_id,
-                   SUM(input_tokens + output_tokens) AS total_tokens,
-                   SUM(input_tokens) AS input_tokens,
+            SELECT user_id,
+                   SUM(input_tokens)  AS input_tokens,
                    SUM(output_tokens) AS output_tokens
             FROM token_usage
             WHERE created_at >= NOW() - INTERVAL '%s hours'
-            GROUP BY user_id, session_id
-        ) tu ON tu.user_id = cm.user_id AND tu.session_id = cm.session_id
-        WHERE cm.created_at >= NOW() - INTERVAL '%s hours'
-        GROUP BY cm.user_id
-        ORDER BY messages DESC
+            GROUP BY user_id
+        ) tu ON tu.user_id = cm.user_id
+        ORDER BY cm.messages DESC
         """,
         (hours, hours, hours),
     )
