@@ -12,6 +12,7 @@ Constraints:
 - Keep PR small and focused.
 - Prefer deterministic checks (artifacts exist, status codes, key error strings).
 - Do not add heavy UI testing (no Playwright/Selenium in v0).
+- Never add Co-authored-by trailers; never commit; I will commit manually.
 
 Repo conventions:
 - Put test cases in tests/tests.yaml
