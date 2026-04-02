@@ -42,7 +42,7 @@ def _get_adata() -> AnnData:
 def _get_cluster_key() -> str:
     """Auto-detect the clustering key from the dataset."""
     adata = _get_adata()
-    for key in ("leiden", "louvain"):
+    for key in ("leiden", "louvain", "seurat_clusters", "cluster", "clusters"):
         if key in adata.obs.columns:
             return key
     # If no clustering found, return leiden as default
