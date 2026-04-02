@@ -39,10 +39,12 @@ tests:
     expected_status: PASS
     must_contain:
       - "umap"
+    requires_plot: true
+    requires_precomputed_umap: true
     notes: >
-      Requires the dataset to have X_umap in obsm and a leiden column in obs.
-      If the dataset is raw, the agent will ask to preprocess first – in that
-      case must_contain will fail and the test is recorded as FAIL with a note.
+      Requires the dataset to have X_umap in obsm and a leiden/louvain column in obs.
+      Fails immediately (pre-flight) if X_umap is absent — the test is not applicable
+      to raw datasets. Use a preprocessed h5ad (e.g. pbmc_test.h5ad).
 
   - case_id: HP-03
     category: happy_path
@@ -51,6 +53,9 @@ tests:
     must_contain:
       - "violin"
       - "CD3D"
+    must_not_contain:
+      - "preprocess"
+    requires_plot: true
     notes: "Assumes CD3D is present in var_names."
 
   - case_id: HP-04
@@ -59,6 +64,9 @@ tests:
     expected_status: PASS
     must_contain:
       - "dot plot"  # agent writes "dot plot" (two words), not "dotplot"
+    must_not_contain:
+      - "preprocess"
+    requires_plot: true
     notes: "Assumes CD3D, MS4A1, NKG7 are present in var_names."
 
   - case_id: HP-05
@@ -67,14 +75,20 @@ tests:
     expected_status: PASS
     must_contain:
       - "cluster"
-    notes: "Requires a leiden clustering column in obs."
+    notes: >
+      Requires a leiden/seurat clustering column in obs. Agent may ask for
+      clarification (marker vs pairwise) — that is acceptable. Artifact assertion
+      deferred until task-router architecture can distinguish analysis vs
+      conversation tasks and assert on tool_called + artifact directly.
 
   - case_id: HP-06
     category: happy_path
     prompt: "Summarize the QC metrics for this dataset."
     expected_status: PASS
     must_contain:
-      - "n_genes"
+      - "mean"    # always present in QC summary regardless of column naming convention
+      - "median"  # (scanpy: n_genes / seurat: nFeature_RNA — column names vary by dataset)
+    requires_table: true
 
   # ── Input / data errors (6) ──────────────────────────────────────────────────
   # The agent should produce a clear error message, not silently succeed.
@@ -147,14 +161,17 @@ tests:
 
   - case_id: IE-06
     category: input_error
-    prompt: "MANUAL – invalid dataset path"
-    expected_status: WARN
+    prompt: "Run differential expression for cluster 999 versus all other cells."
+    expected_status: FAIL
     must_contain: []
+    must_not_contain:
+      - "analysis complete"
+      - "successfully ran"
+      - "top genes"
     notes: >
-      MANUAL TEST: cannot be exercised in-process when --dataset points to a
-      valid file. To validate: run the script with --dataset /nonexistent/path.h5ad
-      and confirm the runner exits with a clear FileNotFoundError message before
-      starting any test case. The runner marks this case as SKIP automatically.
+      Tests invalid cluster ID: cluster 999 does not exist in any real dataset.
+      The agent must not silently succeed — we check it did not produce DE results
+      rather than asserting specific error phrasing (which varies by run).
 
   # ── Resource / scale (4) ────────────────────────────────────────────────────
   # Best-effort checks; a must_contain miss records a WARN, not a FAIL.
@@ -167,6 +184,7 @@ tests:
     expected_status: WARN
     must_contain:
       - "dot plot"  # agent writes "dot plot" (two words)
+    requires_plot: true
     notes: >
       Exercises a 10-gene panel. Primarily a smoke-test for large gene lists;
       a partial match (some genes not found) is still acceptable for WARN.
@@ -196,13 +214,16 @@ tests:
 
   - case_id: RS-04
     category: resource_scale
-    prompt: "MANUAL – large dataset performance"
+    prompt: "Show a heatmap of the top 5 marker genes for each cluster."
     expected_status: WARN
-    must_contain: []
+    must_contain:
+      - "heatmap"
+    requires_plot: true
     notes: >
-      MANUAL TEST: Run with a dataset containing >50k cells and measure wall
-      clock time for HP-02 (UMAP) and HP-05 (DE). Expected: each completes
-      within 5 minutes. This case is always SKIPped by the automated runner.
+      Tests the heatmap tool, which has no other coverage in the suite.
+      If rank_genes_groups is pre-computed the agent plots directly; otherwise
+      it runs DE first then heatmap. WARN because dataset-dependent (some datasets
+      may lack enough clusters or markers for a clean heatmap).
 
   # ── Out-of-scope + paraphrase (4) ────────────────────────────────────────────
   # Two genuine refusals; two paraphrases of supported requests that must succeed.
@@ -229,15 +250,17 @@ tests:
       Run PAGA trajectory analysis and show me the RNA velocity arrows
       on the UMAP.
     expected_status: FAIL
-    must_contain:
-      - "not"
+    must_contain: []
     must_not_contain:
       - "trajectory computed"
       - "velocity arrows"
       - "paga complete"
     notes: >
       Trajectory analysis and RNA velocity are out of scope.
-      The agent should decline without crashing.
+      The agent should decline without crashing. On a raw dataset it may redirect
+      to preprocessing rather than explicitly saying "not supported" — so we only
+      check that it did NOT actually perform the analysis (must_not_contain), not
+      the specific wording of the refusal.
 
   - case_id: OOS-03
     category: out_of_scope
@@ -247,6 +270,7 @@ tests:
     expected_status: PASS
     must_contain:
       - "CD3D"
+    requires_plot: true
     notes: >
       Paraphrase of a violin-plot request. The agent must recognize this as a
       supported operation and produce a plot, not refuse it as out-of-scope.
@@ -259,6 +283,8 @@ tests:
     expected_status: PASS
     must_contain:
       - "umap"
+    requires_plot: true
+    requires_precomputed_umap: true
     notes: >
       Paraphrase of a UMAP-by-cluster request. The agent should map this to
-      the umap_plot tool and succeed.
+      the umap_plot tool and succeed. Requires preprocessed dataset (X_umap present).
