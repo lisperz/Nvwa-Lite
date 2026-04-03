@@ -1,6 +1,209 @@
-# Session Summary — 2026-03-30 (Latest Update)
+# Session Summary — 2026-04-03 (Latest Update)
 
-## Recent Changes This Session (2026-03-30)
+# Session Summary — 2026-04-03 (Latest Update)
+
+## Recent Changes This Session (2026-04-03)
+
+### 4. Cell Composition Cross-Tabulation Bug Fix ✅ DEPLOYED (PR #4)
+
+**Problem:** When users asked "How many cells per cell type in each condition?", the agent:
+1. Incorrectly called `differential_expression()` first (irrelevant DEG table)
+2. Fabricated a composition table with round numbers (4,500, 3,200...) instead of real counts (10,784, 2,891, 1,455...)
+3. Said "cannot access data" when asked for exact counts after showing a plot
+4. Showed raw serialized dataframe text in the UI ("Generated Code" section)
+
+**Root Causes:**
+1. No cross-tabulation tool existed — `inspect_metadata()` only does single-column `value_counts()`
+2. `composition_plot()` and `cell_composition()` were separate tools with no data sharing — plot computed data then discarded it
+3. `TableResult` constructor used wrong field name (`data=` instead of `csv_data=`, missing `display_df=`)
+4. `display_df` used `to_string()` instead of `to_markdown()` → raw text rendered in Streamlit
+5. Tool return value contained raw dataframe dumps, causing agent to echo them in response
+6. No anti-fabrication guardrail — when composition tool failed, agent fell back to `inspect_metadata()` marginals and fabricated the full contingency table (mathematically invalid)
+
+**Solution (Unified Pipeline):**
+- `src/analysis/composition.py` — NEW: `cross_tabulate_metadata()` — Seurat-equivalent `groupby().size().unstack()`
+- `src/plotting/composition.py` — NEW: `plot_composition()` — stacked bar chart, accepts pre-computed crosstab
+- Replaced two separate tools (`cell_composition` + `composition_plot`) with ONE unified `composition_analysis()` tool:
+  - Computes crosstab ONCE (single source of truth)
+  - Returns both count table + stacked bar chart from same computation
+  - Fixed `TableResult` constructor (`csv_data=`, `display_df=`)
+  - `display_df` now uses `to_markdown()` for proper Streamlit rendering
+  - Tool return value is short confirmation — no raw data dumps
+- System prompt updates:
+  - CRITICAL RULE #5: ANTI-FABRICATION GUARDRAIL — exact counts only from executed aggregation
+  - Marginal distributions do NOT determine cross-tabulation — no fallback from `inspect_metadata()`
+  - "Are my samples balanced?" now distinguishes total cell count balance vs cell-type composition balance
+  - "Can you show me the exact number?" (follow-up) → refer to existing table, do NOT re-run
+  - Composition balance interpretation must cite row-normalized percentages and largest shifts
+
+**Files modified:**
+- `src/analysis/composition.py` — NEW (83 lines)
+- `src/plotting/composition.py` — NEW (103 lines), added `crosstab` parameter
+- `src/agent/tools.py` — replaced `cell_composition` + `composition_plot` with `composition_analysis`; added `import io`, `import pandas as pd`
+- `src/agent/prompts.py` — anti-fabrication rule + intent mapping + balance guidance
+
+**PR:** https://github.com/lisperz/Nvwa-Lite/pull/4 (merged to main, squash)
+
+**Deployment:** ✅ Deployed to EC2 2026-04-03
+
+**Tested:**
+- "How many cells per cell type in each condition?" → `composition_analysis()` called, real numbers shown ✓
+- "Can you show me the exact number?" → refers to existing table, no re-run ✓
+- "Are my samples balanced?" → asks user to clarify total counts vs composition ✓
+- Table renders as proper Markdown table, no raw dumps ✓
+- Anti-fabrication: if tool fails, agent reports error — does NOT synthesize contingency table ✓
+
+---
+
+### 3. Multi-Turn Visualization State Tracking + Split UMAP Legend Fix ✅ DEPLOYED
+
+**Problem 1:** When users iteratively refine a UMAP plot across chat turns, the agent drops previously established constraints (e.g., `split_by` lost when user says "color by cell type instead").
+
+**Problem 2:** Split UMAP plots showed incomplete legends (only 2 cell types instead of all 12) because the legend only displayed cell types present in the last panel.
+
+**Root causes:**
+1. Chat history is text-only — tool call parameters not preserved across turns
+2. No visualization state tracking (unlike `DatasetState` for preprocessing)
+3. No prompt guidance for refinement protocol
+4. Split panel legend hardcoded to show only last panel's cell types
+
+**Solution:**
+- Created `src/agent/viz_state.py` — `VisualizationState` dataclass + singleton API (`bind_viz_state`, `get_viz_state`, `update_viz_state`)
+- Updated 6 plot tools to call `update_viz_state()` after successful plot generation
+- Added `LAST VISUALIZATION STATE` and `VISUALIZATION REFINEMENT PROTOCOL` sections to system prompt
+- Threaded `viz_state` through `create_agent()` and persisted in `st.session_state`
+- Fixed split UMAP legend to show ALL cell types across all panels with unified legend on right side
+
+**Files modified:**
+- `src/agent/viz_state.py` — NEW file (81 lines)
+- `src/agent/tools.py` — added `update_viz_state()` calls in 6 plot tools
+- `src/agent/prompts.py` — added viz state block + refinement protocol to template
+- `src/agent/core.py` — threaded `viz_state` parameter through agent creation
+- `src/ui/app.py` — persist `viz_state` in session state, reset on dataset load
+- `src/plotting/executor.py` — unified legend for split UMAP plots showing all cell types
+
+**PR:** https://github.com/lisperz/Nvwa-Lite/pull/3 (merged to main, squash)
+
+**Deployment:** ✅ Deployed to EC2 via SSH at ~10:20 UTC 2026-04-03
+
+**Tested:**
+- Multi-turn refinement: "Show UMAP split by condition" → "Color by cell type instead" → preserves split ✓
+- Legend display: Shows all 12 cell types in unified legend on right side ✓
+- State reset: Upload new dataset → no stale viz state ✓
+
+---
+
+### 2. Fixed Inconsistent Response for Cell Distribution Queries ✅ DEPLOYED
+
+**Root cause:** The word "distribution" is ambiguous — the LLM sometimes interpreted "distribution of cells across conditions" as QC metric violin plots (nCount_RNA/nFeature_RNA) instead of cell count breakdowns per condition.
+
+**Fix:** Added explicit intent mapping in `src/agent/prompts.py` under `USER INTENT MAPPING`:
+- Maps "cell distribution / how many cells per condition / are samples balanced / cell composition" queries to `inspect_metadata()`
+- Includes negative instruction: "Do NOT use violin_plot for this — violin plots show expression/QC metric distributions, not cell composition"
+- 5 concrete examples to anchor the LLM's behavior
+
+**Files modified:**
+- `src/agent/prompts.py` — added intent mapping entry
+
+**Also fixed:** `scripts/start.sh` — added `source .env` so local dev starts with env vars loaded
+
+**PR:** https://github.com/lisperz/Nvwa-Lite/pull/2 (merged to main, squash)
+
+**Deployment:** ✅ Deployed to EC2 via SSH. `nvwa-lite` and `redis` containers running. Landing container exits (expected — port 80 held by host nginx).
+
+**Tested:** Confirmed fix works locally before deploying.
+
+---
+
+### 1. Fixed Token Usage Counting and Cost Calculation ✅ DEPLOYED
+
+**Root cause:** Two bugs were causing ~30x inflation in reported token usage and costs:
+
+1. **Fan-out JOIN bug in analytics queries** — `get_overview()` and `get_user_breakdown()` in `analytics.py` joined `chat_messages` (many rows per session) with aggregated `token_usage`/`tool_executions` subqueries (one row per session). This multiplied token/tool counts by the number of messages per session. Example: 10 messages × 50K tokens = 500K counted instead of 50K.
+
+2. **Token logging bug in core.py** — Extracted `total_tokens` from OpenAI response but stored it entirely as `output_tokens` with `input_tokens=0`. This caused all tokens to be charged at the output rate ($0.60/M) instead of splitting between input ($0.15/M) and output ($0.60/M) rates.
+
+**Fix:**
+- `src/monitoring/analytics.py` — rewrote `get_overview()` and `get_user_breakdown()` to use separate queries without JOINs, eliminating row multiplication
+- `src/agent/core.py` — extract `prompt_tokens` and `completion_tokens` separately from OpenAI response metadata (`usage.get("prompt_tokens")` and `usage.get("completion_tokens")`) and log them correctly
+
+**Files modified:**
+- `src/monitoring/analytics.py` — fixed fan-out JOIN in overview and user breakdown queries
+- `src/agent/core.py` — fixed token extraction to properly split input/output tokens
+
+**Result:** Dashboard now matches OpenAI billing ($0.45 actual vs $14.59 previously reported for 7-day window)
+
+**Deployment:** ✅ Deployed to EC2 via SSH, services rebuilt and restarted at 01:57 UTC 2026-04-03
+
+**Note:** Historical data in database still shows `input_tokens=0` because it was logged before the fix. Only new sessions created after deployment will have correct input/output token split.
+
+**PR:** https://github.com/lisperz/Nvwa-Lite/pull/1 (merged to main)
+
+---
+
+## Previous Session Changes (2026-03-31)
+
+### 1. Fixed nginx Upload Limit in /app Location Block ✅ DEPLOYED
+
+### 1. Fixed nginx Upload Limit in /app Location Block ✅ DEPLOYED
+
+**Root cause:** `client_max_body_size 2000m;` was set at the server level but **missing inside the `/app` location block**. Nginx location blocks do not reliably inherit this setting, so uploads > 1 MB through `/app` were being rejected with HTTP 413.
+
+**Fix:**
+- Added `client_max_body_size 2000m;` explicitly inside the `location /app` block
+- Also added `client_body_timeout 300s;` and `client_body_buffer_size 128k;` for slow uploads
+- Increased `proxy_connect_timeout` from 60s to 300s
+
+**Files modified:**
+- `nginx/landing_ssl.conf` — added upload directives inside `/app` location block
+
+**Deployment:** ✅ Deployed to EC2 via `bash scripts/update_nginx.sh`
+
+---
+
+### 2. Diagnosed Slow/Stuck Uploads — Root Cause: Cloudflare 100 MB Limit ✅ RESOLVED
+
+**Root cause:** Cloudflare (Free plan) has a **100 MB upload size limit**. Since `nvwa.bio` was proxied through Cloudflare (orange cloud), any file > 100 MB was silently dropped or stalled, even though nginx and Streamlit were both configured for 2 GB.
+
+**Investigation findings:**
+- `curl -I https://nvwa.bio/app` confirmed `server: cloudflare` — traffic was Cloudflare-proxied
+- Current upload flow is **proxy upload**: Browser → Cloudflare → nginx → Streamlit → S3 (double transfer, hits CF limit)
+- `storage/service.py` already has `generate_upload_url()` for presigned S3 URLs, but it is **not wired to the UI** — this is the gap to fix in future
+
+**Resolution (immediate):** User turned off Cloudflare proxy for `nvwa.bio` — set DNS record to "gray cloud" (DNS only). Traffic now goes directly to EC2 without Cloudflare proxying.
+- ✅ Upload size limit removed (nginx limit is 2 GB, Streamlit limit is 2 GB)
+- ⚠️ Cloudflare DDoS protection disabled (acceptable for pilot phase)
+
+---
+
+### 3. Upload Architecture Analysis & Future Plan 📋
+
+**Current upload flow (proxy upload — inefficient):**
+```
+Browser → nginx → Streamlit → S3
+```
+File is received by Streamlit first (consumes EC2 bandwidth), then re-uploaded to S3.
+
+**Key finding in codebase:**
+- `src/storage/service.py` — `S3StorageService.generate_upload_url()` (lines 48-80) already generates presigned PUT URLs for direct browser→S3 uploads
+- `src/ui/components.py` — `file_upload_widget()` uses `st.file_uploader()` (proxy upload) and calls `s3_service.upload_file()` (backend-to-S3 push)
+- The presigned URL method exists but is **not connected to the UI**
+
+**Future plan (Option 2 — Direct S3 Upload):**
+- Replace `st.file_uploader()` with a custom HTML/JS component
+- Browser requests presigned URL from backend
+- Browser uploads directly to S3 (bypasses nginx/Cloudflare/Streamlit entirely)
+- Backend loads file from S3 for processing
+- Benefits: no size limits (5 TB), zero server bandwidth, scales to any number of users
+- Estimated cost: ~$6/month vs $200/month for Cloudflare Business plan
+
+**Reference documents:**
+- `discuss/UPLOAD_ARCHITECTURE_PROPOSAL.md` — original architecture proposal
+- `discuss/DIRECT_S3_UPLOAD_IMPLEMENTATION.md` — detailed implementation plan with code examples
+
+---
+
+## Previous Session Changes (2026-03-30)
 
 ### 1. Fixed nginx Upload Limit for .h5ad Files ✅ DEPLOYED
 
@@ -407,12 +610,15 @@ CREATE TABLE message_artifacts (
 ✓ Concurrency: 20 sessions, 2 per user (supports 10 concurrent users)
 ✓ SSL certificate with auto-renewal
 ✓ Nginx reverse proxy with HTTPS
+✓ Cell composition analysis: `composition_analysis()` unified tool — computes crosstab once, returns count table + stacked bar chart + optional % table
+✓ Anti-fabrication guardrail: exact counts only from executed aggregation; fallback from marginals is blocked
+✓ "Are my samples balanced?" distinguishes total cell count balance vs cell-type composition balance
 
 ### Known Issues
 - None currently blocking
 
 ### Tool Count
-25 tools total
+27 tools total (added `composition_analysis`; removed `cell_composition` and `composition_plot`)
 
 ### RDS Schema (6 tables)
 - `users` — pilot user tokens (SHA-256 hashed)
@@ -447,6 +653,8 @@ CREATE TABLE message_artifacts (
 
 ### High Priority
 1. **Change admin password** — Replace default `NvwaAdmin2026Secure` with something personal
+
+### Medium Priority
 
 ---
 
