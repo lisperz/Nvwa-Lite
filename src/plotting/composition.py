@@ -10,6 +10,7 @@ import io
 import logging
 
 import matplotlib.pyplot as plt
+import pandas as pd
 from anndata import AnnData
 
 from src.analysis.composition import cross_tabulate_metadata

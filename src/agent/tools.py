@@ -464,9 +464,10 @@ def composition_analysis(
             crosstab_counts.to_csv(csv_buffer)
 
             table_result = TableResult(
-                data=csv_buffer.getvalue(),
+                csv_data=csv_buffer.getvalue(),
                 code=f'cross_tabulate_metadata(adata, "{row_key}", "{col_key}")',
                 message=f"Cell counts: {col_key} across {row_key}",
+                display_df=crosstab_counts.to_string(),
             )
             _store_table_and_return(table_result)
             results.append(f"Count table:\n{crosstab_counts.to_string()}")
@@ -478,9 +479,10 @@ def composition_analysis(
             crosstab_pct.to_csv(csv_buffer_pct)
 
             table_result_pct = TableResult(
-                data=csv_buffer_pct.getvalue(),
+                csv_data=csv_buffer_pct.getvalue(),
                 code=f'cross_tabulate_metadata(adata, "{row_key}", "{col_key}", normalize=True)',
                 message=f"Cell percentages: {col_key} across {row_key}",
+                display_df=crosstab_pct.to_string(),
             )
             _store_table_and_return(table_result_pct)
             results.append(f"\nPercentage table:\n{crosstab_pct.to_string()}")
