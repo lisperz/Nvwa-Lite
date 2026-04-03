@@ -102,6 +102,8 @@ def plot_umap(
     if split_by:
         # Create separate panels for each group in split_by
         import numpy as np
+        import matplotlib.patches as mpatches
+
         groups = adata.obs[split_by].unique()
         n_groups = len(groups)
 
@@ -109,11 +111,30 @@ def plot_umap(
         n_cols = min(4, n_groups)  # Max 4 columns
         n_rows = (n_groups + n_cols - 1) // n_cols
 
-        fig, axes = plt.subplots(n_rows, n_cols, figsize=(5 * n_cols, 5 * n_rows))
+        # Add extra space on the right for legend if requested
+        fig_width = 5 * n_cols + (3 if show_legend else 0)
+        fig, axes = plt.subplots(n_rows, n_cols, figsize=(fig_width, 5 * n_rows))
         if n_groups == 1:
             axes = [axes]
         else:
             axes = axes.flatten() if n_groups > 1 else [axes]
+
+        # Get all unique categories and colors from the full dataset for unified legend
+        if is_obs and show_legend:
+            all_categories = sorted(adata.obs[color].unique())
+            # Get the color palette scanpy would use
+            if hasattr(adata.uns, f'{color}_colors'):
+                colors = adata.uns[f'{color}_colors']
+            else:
+                # Use scanpy's default palette
+                from matplotlib import cm
+                n_cats = len(all_categories)
+                if n_cats <= 20:
+                    colors = [plt.cm.tab20(i) for i in range(n_cats)]
+                elif n_cats <= 28:
+                    colors = [plt.cm.tab20(i % 20) for i in range(n_cats)]
+                else:
+                    colors = [plt.cm.tab20(i % 20) for i in range(n_cats)]
 
         # Plot each group in a separate panel
         for idx, group in enumerate(sorted(groups)):
@@ -123,16 +144,13 @@ def plot_umap(
             mask = adata.obs[split_by] == group
             subset = adata[mask, :]
 
-            # Only show legend on the last panel to avoid clutter
-            legend_loc = "right margin" if (show_legend and idx == n_groups - 1) else None
-
-            # Plot UMAP for this subset
+            # Plot UMAP for this subset without legend
             sc.pl.umap(
                 subset,
                 color=color,
                 ax=ax,
                 title=f"{split_by}: {group}",
-                legend_loc=legend_loc,
+                legend_loc=None,
                 show=False,
             )
 
@@ -140,7 +158,14 @@ def plot_umap(
         for idx in range(n_groups, len(axes)):
             axes[idx].axis('off')
 
-        plt.tight_layout()
+        # Add unified legend on the right side if requested
+        if show_legend and is_obs:
+            legend_elements = [mpatches.Patch(facecolor=colors[i], label=cat)
+                             for i, cat in enumerate(all_categories)]
+            fig.legend(handles=legend_elements, loc='center right',
+                      bbox_to_anchor=(0.98, 0.5), frameon=True)
+
+        plt.tight_layout(rect=[0, 0, 0.85 if show_legend else 1, 1])
     else:
         # Generate regular plot
         legend_loc = "right margin" if show_legend else None
