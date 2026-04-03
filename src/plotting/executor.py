@@ -123,13 +123,16 @@ def plot_umap(
             mask = adata.obs[split_by] == group
             subset = adata[mask, :]
 
+            # Only show legend on the last panel to avoid clutter
+            legend_loc = "right margin" if (show_legend and idx == n_groups - 1) else None
+
             # Plot UMAP for this subset
             sc.pl.umap(
                 subset,
                 color=color,
                 ax=ax,
                 title=f"{split_by}: {group}",
-                legend_loc=None,
+                legend_loc=legend_loc,
                 show=False,
             )
 
