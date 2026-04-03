@@ -22,6 +22,7 @@ import streamlit as st
 
 from src.agent.core import create_agent
 from src.agent.tools import clear_plot_results, clear_table_results, get_plot_results, get_table_results, set_adata_replaced_callback, set_plot_generated_callback
+from src.agent.viz_state import VisualizationState, get_viz_state
 from src.auth.service import AuthService
 from src.plotting.styles import configure_plot_style
 from src.session.manager import SessionManager
@@ -204,6 +205,7 @@ if need_reload:
 
     st.session_state.adata = adata
     st.session_state.ds_state = ds_state
+    st.session_state.viz_state = VisualizationState()
     st.session_state._dataset_filename = current_filename
     st.session_state.messages = []
     st.session_state.chat_history = []
@@ -338,6 +340,7 @@ if prompt := st.chat_input("Ask about your data... (e.g., 'Show me the UMAP plot
                 adata=adata,
                 api_key=api_key,
                 dataset_state=ds_state,
+                viz_state=st.session_state.get("viz_state"),
                 user_id=user.user_id,
                 session_id=st.session_state.session_id,
             )
@@ -347,6 +350,11 @@ if prompt := st.chat_input("Ask about your data... (e.g., 'Show me the UMAP plot
                 chat_history=st.session_state.chat_history[:-1],
                 filename=ds_state.filename,
             )
+
+            # Read back updated viz state after tool calls
+            updated_viz = get_viz_state()
+            if updated_viz is not None:
+                st.session_state.viz_state = updated_viz
 
             plot_results = get_plot_results()
             table_results = get_table_results()

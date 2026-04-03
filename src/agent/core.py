@@ -16,6 +16,7 @@ from langchain_openai import ChatOpenAI
 
 from src.agent.prompts import build_system_prompt
 from src.agent.tools import bind_dataset, bind_dataset_state, get_all_tools
+from src.agent.viz_state import VisualizationState, bind_viz_state
 from src.db.logger import DatabaseLogger
 from src.logging.service import EventLogger
 
@@ -39,6 +40,7 @@ def create_agent(
     api_key: str,
     model: str = "gpt-4o-mini",
     dataset_state: DatasetState | None = None,
+    viz_state: VisualizationState | None = None,
     user_id: str | None = None,
     session_id: str | None = None,
 ):
@@ -49,12 +51,15 @@ def create_agent(
         api_key: OpenAI API key.
         model: Model name to use.
         dataset_state: Optional processing state tracker.
+        viz_state: Optional visualization state for multi-turn refinement.
         user_id: User ID for logging.
         session_id: Session ID for logging.
     """
     bind_dataset(adata)
     if dataset_state is not None:
         bind_dataset_state(dataset_state)
+    if viz_state is not None:
+        bind_viz_state(viz_state)
 
     llm = ChatOpenAI(model=model, api_key=api_key, temperature=0)
     tools = get_all_tools()
@@ -64,7 +69,8 @@ def create_agent(
     logger.info(f"Creating agent with {len(tools)} tools: {', '.join(tool_names)}")
 
     llm_with_tools = llm.bind_tools(tools)
-    system_prompt = build_system_prompt(adata, dataset_state=dataset_state)
+    viz_block = viz_state.to_prompt_block() if viz_state else ""
+    system_prompt = build_system_prompt(adata, dataset_state=dataset_state, viz_state_block=viz_block)
 
     # Initialize event logger if user_id and session_id provided
     event_logger = None

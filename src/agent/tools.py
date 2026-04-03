@@ -13,6 +13,7 @@ import pandas as pd
 from langchain_core.tools import tool
 
 from src.agent import analysis_tools
+from src.agent.viz_state import update_viz_state
 from src.analysis.calculations import calculate_mito_percentage, get_metadata_summary
 from src.analysis.differential import get_de_dataframe, run_differential_expression, run_pairwise_de, get_all_de_results
 from src.analysis.marker_genes import get_top_marker_genes_per_cluster
@@ -151,10 +152,13 @@ def umap_plot(color_by: str, show_labels: bool = False, show_legend: bool = True
         split_by = _get_cluster_key()
 
     try:
-        return _store_and_return(plot_umap(
+        result = _store_and_return(plot_umap(
             adata, color=color_by, show_labels=show_labels, show_legend=show_legend,
             split_by=split_by if split_by else None
         ))
+        update_viz_state("umap", color_by=color_by, split_by=split_by or None,
+                         show_labels=show_labels, show_legend=show_legend)
+        return result
     except ValueError as e:
         return f"Error: {e}"
     except Exception as e:
@@ -183,7 +187,10 @@ def violin_plot(genes: str, groupby: str = "") -> str:
             gene_list = [g.strip() for g in genes.split(",")]
         else:
             gene_list = genes.strip()
-        return _store_and_return(plot_violin(adata, genes=gene_list, groupby=groupby))
+        result = _store_and_return(plot_violin(adata, genes=gene_list, groupby=groupby))
+        genes_list = gene_list if isinstance(gene_list, list) else [gene_list]
+        update_viz_state("violin", groupby=groupby, genes=genes_list)
+        return result
     except ValueError as e:
         return f"Error: {e}"
     except Exception as e:
@@ -207,7 +214,9 @@ def dotplot(genes: str, groupby: str = "") -> str:
 
     gene_list = [g.strip() for g in genes.split(",")]
     try:
-        return _store_and_return(plot_dotplot(adata, genes=gene_list, groupby=groupby))
+        result = _store_and_return(plot_dotplot(adata, genes=gene_list, groupby=groupby))
+        update_viz_state("dotplot", groupby=groupby, genes=gene_list)
+        return result
     except ValueError as e:
         return f"Error: {e}"
     except Exception as e:
@@ -224,7 +233,9 @@ def feature_plot(gene: str) -> str:
     """
     adata = _get_adata()
     try:
-        return _store_and_return(plot_feature(adata, gene=gene))
+        result = _store_and_return(plot_feature(adata, gene=gene))
+        update_viz_state("feature", genes=[gene])
+        return result
     except ValueError as e:
         return f"Error: {e}"
     except Exception as e:
@@ -249,9 +260,11 @@ def heatmap_plot(genes: str, groupby: str = "", n_genes_per_cluster: int = 0) ->
 
     gene_list = [g.strip() for g in genes.split(",")]
     try:
-        return _store_and_return(plot_heatmap(
+        result = _store_and_return(plot_heatmap(
             adata, genes=gene_list, groupby=groupby, n_genes_per_cluster=n_genes_per_cluster
         ))
+        update_viz_state("heatmap", groupby=groupby, genes=gene_list)
+        return result
     except ValueError as e:
         return f"Error: {e}"
     except Exception as e:
@@ -271,7 +284,9 @@ def scatter_plot(gene_x: str, gene_y: str, color_by: str = "") -> str:
     adata = _get_adata()
     try:
         color = color_by if color_by else None
-        return _store_and_return(plot_scatter(adata, gene_x=gene_x, gene_y=gene_y, color_by=color))
+        result = _store_and_return(plot_scatter(adata, gene_x=gene_x, gene_y=gene_y, color_by=color))
+        update_viz_state("scatter", color_by=color_by or None, genes=[gene_x, gene_y])
+        return result
     except ValueError as e:
         return f"Error: {e}"
     except Exception as e:
