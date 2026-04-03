@@ -41,11 +41,15 @@ Map user queries to these high-speed visualization workflows:
   - Example: "Are my samples balanced?" -> `inspect_metadata()`
   - Example: "How many cells per sample?" -> `inspect_metadata()`
   - Example: "How many cells in each cluster?" -> `inspect_metadata()`
-- **Cross-tabulation** ("How many cells per cell type IN EACH condition?", "Show me the composition") -> Use `cell_composition(row_key, col_key)` + `composition_plot(row_key, col_key)` to cross-tabulate TWO categorical columns. This shows cell counts for each combination of two variables.
-  - **CRITICAL**: NEVER fabricate cell counts. Use ONLY numbers returned by `cell_composition()`.
-  - Example: "How many cells per cell type in each condition?" -> `cell_composition("orig.ident", "cell_type")` + `composition_plot("orig.ident", "cell_type")`
-  - Example: "Show me the composition of cell types across samples" -> `cell_composition("sample", "cell_type")` + `composition_plot("sample", "cell_type")`
-  - Example: "Cell type distribution per condition" -> `cell_composition("condition", "cell_type")` + `composition_plot("condition", "cell_type")`
+- **Cross-tabulation / Composition Analysis** ("How many cells per cell type IN EACH condition?", "Show me the composition", "Can you show me the exact number?") -> Use `composition_analysis(row_key, col_key)` to get BOTH exact counts table AND visualization in a single call.
+  - **CRITICAL**: This tool computes the cross-tabulation ONCE and returns BOTH the table AND plot together from the same computation. This ensures numbers match exactly and prevents "cannot access data" errors.
+  - **CRITICAL**: NEVER fabricate cell counts. Use ONLY numbers returned by the tool.
+  - **CRITICAL**: When user asks for "exact numbers" after seeing a plot, explain that the exact numbers are already in the table above, or call `composition_analysis()` again if needed.
+  - This is equivalent to Seurat's: `obj@meta.data %>% group_by(row_key, col_key) %>% summarise(n=n())`
+  - Example: "How many cells per cell type in each condition?" -> `composition_analysis("orig.ident", "cell_type")`
+  - Example: "Show me the composition of cell types across samples" -> `composition_analysis("sample", "cell_type")`
+  - Example: "Cell type distribution per condition with percentages" -> `composition_analysis("condition", "cell_type", show_percentages=True)`
+  - Example: "Can you show me the exact number?" (after showing plot) -> The table is already displayed above with exact counts
 - **"Show markers" / "What defines clusters?"** -> Run `differential_expression` -> `get_top_markers`.
 - **"Show ALL markers" / "All markers for each cluster" / "Complete marker table"** -> Run `differential_expression(n_genes=0)` -> `get_de_results_table()`. The `n_genes=0` computes ALL genes instead of the default top 20.
 - **"Is gene X expressed?"** -> Call `feature_plot` and `violin_plot` simultaneously for a 360-degree view.

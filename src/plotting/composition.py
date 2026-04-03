@@ -19,18 +19,20 @@ logger = logging.getLogger(__name__)
 
 
 def plot_composition(
-    adata: AnnData,
-    row_key: str,
-    col_key: str,
+    adata: AnnData | None = None,
+    row_key: str = "",
+    col_key: str = "",
     kind: str = "count",
+    crosstab: pd.DataFrame | None = None,
 ) -> PlotResult:
     """Generate a stacked bar chart showing cell composition.
 
     Args:
-        adata: AnnData object with metadata in .obs.
+        adata: AnnData object with metadata in .obs (if crosstab not provided).
         row_key: Observation key for x-axis groups (e.g., 'condition').
         col_key: Observation key for stacked categories (e.g., 'cell_type').
         kind: Plot type - "count" for absolute counts, "percent" for percentages.
+        crosstab: Pre-computed crosstab DataFrame. If provided, skips computation.
 
     Returns:
         PlotResult with the composition plot.
@@ -42,8 +44,11 @@ def plot_composition(
         raise ValueError(f"kind must be 'count' or 'percent', got '{kind}'")
 
     # Get cross-tabulation data
-    normalize = kind == "percent"
-    crosstab = cross_tabulate_metadata(adata, row_key, col_key, normalize=normalize)
+    if crosstab is None:
+        if adata is None:
+            raise ValueError("Must provide either adata or crosstab")
+        normalize = kind == "percent"
+        crosstab = cross_tabulate_metadata(adata, row_key, col_key, normalize=normalize)
 
     logger.info(
         "Plotting composition: %s × %s (kind=%s)",

@@ -417,85 +417,92 @@ def inspect_metadata(max_unique_values: int = 50) -> str:
 
 
 @tool
-def cell_composition(row_key: str, col_key: str, normalize: bool = False) -> str:
-    """Cross-tabulate two metadata columns to show cell composition.
+def composition_analysis(
+    row_key: str,
+    col_key: str,
+    show_percentages: bool = False,
+    plot_only: bool = False,
+) -> str:
+    """Analyze cell composition across two categorical variables.
 
-    Use this when users ask about cell distribution ACROSS two categorical variables,
-    such as "How many cells per cell type in each condition?" or "Show me the
-    composition of cell types across samples."
+    This tool computes the cross-tabulation ONCE and returns BOTH:
+    1. Exact count table (with CSV download)
+    2. Stacked bar chart visualization
+
+    This ensures the numbers in the table match the plot exactly, preventing
+    any discrepancies or "cannot access data" errors.
+
+    Use this for queries like:
+    - "How many cells per cell type in each condition?"
+    - "Show me the composition"
+    - "Cell type distribution across samples"
+    - "Can you show me the exact number?"
 
     This is equivalent to Seurat's:
     obj@meta.data %>% group_by(row_key, col_key) %>% summarise(n=n())
 
     Args:
-        row_key: First metadata column for rows (e.g., 'orig.ident', 'condition').
-        col_key: Second metadata column for columns (e.g., 'cell_type', 'leiden').
-        normalize: If True, return percentages per row instead of counts.
+        row_key: Metadata column for rows (e.g., 'orig.ident', 'condition').
+        col_key: Metadata column for columns (e.g., 'cell_type', 'leiden').
+        show_percentages: If True, also show percentage table.
+        plot_only: If True, skip table output (for plot-only requests).
 
     Returns:
-        Cross-tabulation table showing cell counts (or percentages) for each
-        combination of row_key and col_key values.
+        Both table and plot results with exact numbers visible to agent.
     """
     adata = _get_adata()
 
     try:
-        crosstab = cross_tabulate_metadata(adata, row_key, col_key, normalize=normalize)
+        # SINGLE SOURCE OF TRUTH - compute once
+        crosstab_counts = cross_tabulate_metadata(adata, row_key, col_key, normalize=False)
 
-        # Convert to CSV string for table display
-        csv_buffer = io.StringIO()
-        crosstab.to_csv(csv_buffer)
-        csv_content = csv_buffer.getvalue()
+        results = []
 
-        # Create TableResult for UI rendering
-        table_result = TableResult(
-            data=csv_content,
-            code=f'cross_tabulate_metadata(adata, "{row_key}", "{col_key}", normalize={normalize})',
-            message=f"Cell composition: {col_key} across {row_key}"
+        # 1. Store and return count table (unless plot_only)
+        if not plot_only:
+            csv_buffer = io.StringIO()
+            crosstab_counts.to_csv(csv_buffer)
+
+            table_result = TableResult(
+                data=csv_buffer.getvalue(),
+                code=f'cross_tabulate_metadata(adata, "{row_key}", "{col_key}")',
+                message=f"Cell counts: {col_key} across {row_key}",
+            )
+            _store_table_and_return(table_result)
+            results.append(f"Count table:\n{crosstab_counts.to_string()}")
+
+        # 2. Optionally show percentages
+        if show_percentages and not plot_only:
+            crosstab_pct = cross_tabulate_metadata(adata, row_key, col_key, normalize=True)
+            csv_buffer_pct = io.StringIO()
+            crosstab_pct.to_csv(csv_buffer_pct)
+
+            table_result_pct = TableResult(
+                data=csv_buffer_pct.getvalue(),
+                code=f'cross_tabulate_metadata(adata, "{row_key}", "{col_key}", normalize=True)',
+                message=f"Cell percentages: {col_key} across {row_key}",
+            )
+            _store_table_and_return(table_result_pct)
+            results.append(f"\nPercentage table:\n{crosstab_pct.to_string()}")
+
+        # 3. Generate plot from the SAME data
+        plot_result = plot_composition(
+            crosstab=crosstab_counts, row_key=row_key, col_key=col_key, kind="count"
         )
+        _store_and_return(plot_result)
+        results.append("\nStacked bar chart generated.")
 
-        # Store and format output
-        result_text = _store_table_and_return(table_result)
+        # 4. Return grounded output
+        output = "\n".join(results)
+        output += "\n\nIMPORTANT: Report ONLY the numbers shown above. Do NOT fabricate or estimate cell counts."
 
-        # Add the actual table data to the output so LLM sees real numbers
-        table_text = "\n\nCell composition table:\n"
-        table_text += crosstab.to_string()
-        table_text += "\n\nIMPORTANT: Report ONLY the numbers shown above. Do NOT fabricate or estimate cell counts."
-
-        return result_text + table_text
+        update_viz_state("composition", row_key=row_key, col_key=col_key)
+        return output
 
     except ValueError as e:
         return f"Error: {e}"
     except Exception as e:
-        logger.exception("Cell composition analysis failed")
-        return f"Unexpected error: {e}"
-
-
-@tool
-def composition_plot(row_key: str, col_key: str, kind: str = "count") -> str:
-    """Generate a stacked bar chart showing cell composition.
-
-    Use this to visualize cell distribution across two categorical variables.
-    Creates a stacked bar chart where each bar represents a row_key value,
-    and the stacks show the distribution of col_key values.
-
-    Args:
-        row_key: Metadata column for x-axis groups (e.g., 'condition', 'orig.ident').
-        col_key: Metadata column for stacked categories (e.g., 'cell_type', 'leiden').
-        kind: Plot type - "count" for absolute counts, "percent" for percentages.
-
-    Returns:
-        Stacked bar chart visualization.
-    """
-    adata = _get_adata()
-
-    try:
-        result = _store_and_return(plot_composition(adata, row_key, col_key, kind=kind))
-        update_viz_state("composition", row_key=row_key, col_key=col_key, kind=kind)
-        return result
-    except ValueError as e:
-        return f"Error: {e}"
-    except Exception as e:
-        logger.exception("Composition plot failed")
+        logger.exception("Composition analysis failed")
         return f"Unexpected error: {e}"
 
 
@@ -1239,9 +1246,9 @@ def get_all_tools() -> list:
     return [
         # Plotting tools
         umap_plot, violin_plot, dotplot, feature_plot,
-        heatmap_plot, scatter_plot, volcano_plot_tool, composition_plot,
+        heatmap_plot, scatter_plot, volcano_plot_tool,
         # Core tools
-        dataset_info, check_data_status, inspect_metadata, cell_composition,
+        dataset_info, check_data_status, inspect_metadata, composition_analysis,
         preprocess_data, differential_expression, get_cluster_degs, compare_groups_de, get_top_markers,
         # QC and statistics tools
         calculate_mito_pct, summarize_obs_column, summarize_qc_metrics_tool,
