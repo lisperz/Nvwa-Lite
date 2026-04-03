@@ -6,6 +6,7 @@ error handling, and structured output for the agent.
 
 from __future__ import annotations
 
+import io
 import logging
 from typing import TYPE_CHECKING, Callable
 
@@ -15,11 +16,13 @@ from langchain_core.tools import tool
 from src.agent import analysis_tools
 from src.agent.viz_state import update_viz_state
 from src.analysis.calculations import calculate_mito_percentage, get_metadata_summary
+from src.analysis.composition import cross_tabulate_metadata
 from src.analysis.differential import get_de_dataframe, run_differential_expression, run_pairwise_de, get_all_de_results
 from src.analysis.marker_genes import get_top_marker_genes_per_cluster
 from src.analysis.preprocessing import run_preprocessing
 from src.analysis.qc_metrics import get_obs_column_statistics, resolve_qc_metric_column, summarize_qc_metrics
 from src.plotting.comparison import plot_dotplot, plot_heatmap, plot_scatter
+from src.plotting.composition import plot_composition
 from src.plotting.executor import PlotResult, TableResult, plot_feature, plot_umap, plot_violin
 from src.plotting.volcano import plot_volcano
 from src.types import DatasetState, detect_dataset_state
@@ -411,6 +414,89 @@ def inspect_metadata(max_unique_values: int = 50) -> str:
     except Exception as e:
         logger.exception("Metadata inspection failed")
         return f"Error inspecting metadata: {e}"
+
+
+@tool
+def cell_composition(row_key: str, col_key: str, normalize: bool = False) -> str:
+    """Cross-tabulate two metadata columns to show cell composition.
+
+    Use this when users ask about cell distribution ACROSS two categorical variables,
+    such as "How many cells per cell type in each condition?" or "Show me the
+    composition of cell types across samples."
+
+    This is equivalent to Seurat's:
+    obj@meta.data %>% group_by(row_key, col_key) %>% summarise(n=n())
+
+    Args:
+        row_key: First metadata column for rows (e.g., 'orig.ident', 'condition').
+        col_key: Second metadata column for columns (e.g., 'cell_type', 'leiden').
+        normalize: If True, return percentages per row instead of counts.
+
+    Returns:
+        Cross-tabulation table showing cell counts (or percentages) for each
+        combination of row_key and col_key values.
+    """
+    adata = _get_adata()
+
+    try:
+        crosstab = cross_tabulate_metadata(adata, row_key, col_key, normalize=normalize)
+
+        # Convert to CSV string for table display
+        csv_buffer = io.StringIO()
+        crosstab.to_csv(csv_buffer)
+        csv_content = csv_buffer.getvalue()
+
+        # Create TableResult for UI rendering
+        table_result = TableResult(
+            data=csv_content,
+            code=f'cross_tabulate_metadata(adata, "{row_key}", "{col_key}", normalize={normalize})',
+            message=f"Cell composition: {col_key} across {row_key}"
+        )
+
+        # Store and format output
+        result_text = _store_table_and_return(table_result)
+
+        # Add the actual table data to the output so LLM sees real numbers
+        table_text = "\n\nCell composition table:\n"
+        table_text += crosstab.to_string()
+        table_text += "\n\nIMPORTANT: Report ONLY the numbers shown above. Do NOT fabricate or estimate cell counts."
+
+        return result_text + table_text
+
+    except ValueError as e:
+        return f"Error: {e}"
+    except Exception as e:
+        logger.exception("Cell composition analysis failed")
+        return f"Unexpected error: {e}"
+
+
+@tool
+def composition_plot(row_key: str, col_key: str, kind: str = "count") -> str:
+    """Generate a stacked bar chart showing cell composition.
+
+    Use this to visualize cell distribution across two categorical variables.
+    Creates a stacked bar chart where each bar represents a row_key value,
+    and the stacks show the distribution of col_key values.
+
+    Args:
+        row_key: Metadata column for x-axis groups (e.g., 'condition', 'orig.ident').
+        col_key: Metadata column for stacked categories (e.g., 'cell_type', 'leiden').
+        kind: Plot type - "count" for absolute counts, "percent" for percentages.
+
+    Returns:
+        Stacked bar chart visualization.
+    """
+    adata = _get_adata()
+
+    try:
+        result = _store_and_return(plot_composition(adata, row_key, col_key, kind=kind))
+        update_viz_state("composition", row_key=row_key, col_key=col_key, kind=kind)
+        return result
+    except ValueError as e:
+        return f"Error: {e}"
+    except Exception as e:
+        logger.exception("Composition plot failed")
+        return f"Unexpected error: {e}"
 
 
 @tool
@@ -1153,9 +1239,9 @@ def get_all_tools() -> list:
     return [
         # Plotting tools
         umap_plot, violin_plot, dotplot, feature_plot,
-        heatmap_plot, scatter_plot, volcano_plot_tool,
+        heatmap_plot, scatter_plot, volcano_plot_tool, composition_plot,
         # Core tools
-        dataset_info, check_data_status, inspect_metadata,
+        dataset_info, check_data_status, inspect_metadata, cell_composition,
         preprocess_data, differential_expression, get_cluster_degs, compare_groups_de, get_top_markers,
         # QC and statistics tools
         calculate_mito_pct, summarize_obs_column, summarize_qc_metrics_tool,
