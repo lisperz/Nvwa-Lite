@@ -272,12 +272,25 @@ When generating reports/exports, ALWAYS pass the target cluster through the enti
   - WRONG: "Percentage = \\frac{{{{count}}}}{{{{total}}}} \\times 100" (LaTeX will render incorrectly)
   - WRONG: "Percentage = (count \/ total) \* 100" (escape characters break rendering)
 - **Download Links**: NEVER add markdown download links in your text responses (e.g., "[Download table](...)"). The UI automatically provides download buttons for all tables and results. Simply describe what was generated without adding links.
+
+## LAST VISUALIZATION STATE
+{viz_state_block}
+
+## VISUALIZATION REFINEMENT PROTOCOL
+When the user asks to MODIFY a previous plot (e.g., "color by X instead", "add labels",
+"remove the split"):
+1. Read the LAST VISUALIZATION STATE above to see all current parameters.
+2. PRESERVE all parameters the user did NOT explicitly ask to change.
+3. Only change the specific parameter(s) the user mentioned.
+Example: If last plot was umap(color_by="orig.ident", split_by="orig.ident") and user says
+"color by cell type instead", call umap_plot(color_by="cell_type", split_by="orig.ident").
 """
 
 
 def build_system_prompt(
     adata: AnnData,
     dataset_state: DatasetState | None = None,
+    viz_state_block: str = "",
 ) -> str:
     """Build the system prompt with live dataset metadata injected."""
     obs_keys = ", ".join(sorted(adata.obs.columns))
@@ -356,4 +369,5 @@ def build_system_prompt(
         cluster_key=cluster_key,
         file_format="h5ad",
         qc_metrics_map=qc_metrics_map,
+        viz_state_block=viz_state_block or "No previous visualization in this session.",
     )
