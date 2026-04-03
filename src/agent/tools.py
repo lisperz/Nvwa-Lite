@@ -436,7 +436,9 @@ def composition_analysis(
     - "How many cells per cell type in each condition?"
     - "Show me the composition"
     - "Cell type distribution across samples"
-    - "Can you show me the exact number?"
+
+    IMPORTANT: Do NOT call this if the composition table was already displayed
+    in a previous turn. Instead, refer the user to the existing table.
 
     This is equivalent to Seurat's:
     obj@meta.data %>% group_by(row_key, col_key) %>% summarise(n=n())
@@ -465,12 +467,11 @@ def composition_analysis(
 
             table_result = TableResult(
                 csv_data=csv_buffer.getvalue(),
-                code=f'cross_tabulate_metadata(adata, "{row_key}", "{col_key}")',
+                code=f'composition_analysis(adata, "{row_key}", "{col_key}")',
                 message=f"Cell counts: {col_key} across {row_key}",
-                display_df=crosstab_counts.to_string(),
+                display_df=crosstab_counts.to_markdown(),
             )
             _store_table_and_return(table_result)
-            results.append(f"Count table:\n{crosstab_counts.to_string()}")
 
         # 2. Optionally show percentages
         if show_percentages and not plot_only:
@@ -480,23 +481,32 @@ def composition_analysis(
 
             table_result_pct = TableResult(
                 csv_data=csv_buffer_pct.getvalue(),
-                code=f'cross_tabulate_metadata(adata, "{row_key}", "{col_key}", normalize=True)',
+                code=f'composition_analysis(adata, "{row_key}", "{col_key}", show_percentages=True)',
                 message=f"Cell percentages: {col_key} across {row_key}",
-                display_df=crosstab_pct.to_string(),
+                display_df=crosstab_pct.round(2).to_markdown(),
             )
             _store_table_and_return(table_result_pct)
-            results.append(f"\nPercentage table:\n{crosstab_pct.to_string()}")
 
         # 3. Generate plot from the SAME data
         plot_result = plot_composition(
             crosstab=crosstab_counts, row_key=row_key, col_key=col_key, kind="count"
         )
         _store_and_return(plot_result)
-        results.append("\nStacked bar chart generated.")
 
-        # 4. Return grounded output
-        output = "\n".join(results)
-        output += "\n\nIMPORTANT: Report ONLY the numbers shown above. Do NOT fabricate or estimate cell counts."
+        # 4. Return a SHORT confirmation to the agent — no raw data dumps
+        # The UI will render the table and plot separately
+        output = (
+            f"Composition analysis complete for {col_key} across {row_key}.\n"
+            f"- Count table: displayed with CSV download button\n"
+            f"- Stacked bar chart: displayed\n"
+        )
+        if show_percentages:
+            output += "- Percentage table: displayed with CSV download button\n"
+        output += (
+            "\nThe exact cell counts are shown in the table above. "
+            "If the user asks for exact numbers, refer them to the displayed table and CSV download. "
+            "Do NOT regenerate the analysis — just reference the existing results."
+        )
 
         update_viz_state("composition", row_key=row_key, col_key=col_key)
         return output
