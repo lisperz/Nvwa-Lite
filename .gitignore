@@ -24,8 +24,9 @@ data/uploads/
 
 # Internal planning documents (local only)
 discuss/
+docs/
 
 # Pilot tokens (contains sensitive authentication data)
 pilot_tokens.json
 pilot_tokens.env
-reports/*.md
+reports/
