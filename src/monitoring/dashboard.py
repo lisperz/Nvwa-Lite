@@ -1,31 +1,32 @@
-"""Monitoring dashboard for Nvwa-Lite MVP.
+"""Admin monitoring dashboard — powered by RDS PostgreSQL.
 
-Real-time metrics and analytics for pilot deployment monitoring.
-Displays KPIs, user activity, tool usage, and error tracking.
+Tabs: Overview · Users · Tools · Sessions
+Run via docker-compose (port 8502) or: uv run streamlit run src/monitoring/dashboard.py
 """
 
 from __future__ import annotations
 
 import logging
+import os
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
-# Ensure project root is on sys.path
 _PROJECT_ROOT = str(Path(__file__).resolve().parent.parent.parent)
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
+import pandas as pd
 import streamlit as st
 
-from src.monitoring.analytics import AnalyticsService
+import src.monitoring.analytics as analytics
 
 # ---------------------------------------------------------------------------
-# Logging setup
+# Logging
 # ---------------------------------------------------------------------------
 
 LOG_DIR = Path("logs")
 LOG_DIR.mkdir(exist_ok=True)
-
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
@@ -34,151 +35,354 @@ logging.basicConfig(
         logging.StreamHandler(),
     ],
 )
-logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Page config
 # ---------------------------------------------------------------------------
 
 st.set_page_config(
-    page_title="Nvwa-Lite Dashboard",
-    page_icon="📊",
+    page_title="Nvwa Admin Dashboard",
+    page_icon="🧬",
     layout="wide",
 )
 
-st.title("📊 Nvwa-Lite Monitoring Dashboard")
-st.caption("Real-time metrics for MVP pilot deployment")
-
 # ---------------------------------------------------------------------------
-# Analytics service
+# Admin auth gate
 # ---------------------------------------------------------------------------
 
-analytics = AnalyticsService(log_dir=LOG_DIR)
+_ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
+
+if not _ADMIN_PASSWORD:
+    st.error("ADMIN_PASSWORD environment variable is not set.")
+    st.stop()
+
+if not st.session_state.get("admin_authed"):
+    st.title("🔒 Admin Login")
+    pw = st.text_input("Password", type="password")
+    if st.button("Login"):
+        if pw == _ADMIN_PASSWORD:
+            st.session_state["admin_authed"] = True
+            st.rerun()
+        else:
+            st.error("Incorrect password.")
+    st.stop()
+
+st.title("🧬 Nvwa Admin Dashboard")
 
 # ---------------------------------------------------------------------------
-# Time range selector
+# Sidebar controls
 # ---------------------------------------------------------------------------
 
-time_range = st.selectbox(
-    "Time Range",
-    options=[1, 6, 12, 24, 48, 168],  # hours
-    format_func=lambda x: f"Last {x} hours" if x < 24 else f"Last {x // 24} days",
-    index=3,  # Default to 24 hours
+with st.sidebar:
+    st.header("Filters")
+    hours = st.selectbox(
+        "Time window",
+        options=[1, 6, 12, 24, 48, 168],
+        format_func=lambda x: f"Last {x}h" if x < 24 else f"Last {x // 24}d",
+        index=3,
+    )
+    auto_refresh = st.toggle("Auto-refresh (30 s)", value=True)
+    st.divider()
+    st.caption(f"DB time: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}")
+
+# ---------------------------------------------------------------------------
+# Tabs
+# ---------------------------------------------------------------------------
+
+tab_overview, tab_users, tab_tools, tab_sessions, tab_feedback = st.tabs(
+    ["📊 Overview", "👥 Users", "🔧 Tools", "📁 Sessions", "💬 Feedback"]
 )
 
-st.divider()
+# ============================================================
+# TAB 1 — OVERVIEW
+# ============================================================
 
-# ---------------------------------------------------------------------------
-# Key metrics
-# ---------------------------------------------------------------------------
+with tab_overview:
+    kpi = analytics.get_overview(hours)
 
-col1, col2, col3, col4 = st.columns(4)
+    c1, c2, c3, c4, c5, c6 = st.columns(6)
+    c1.metric("Active Users", kpi["active_users"])
+    c2.metric("Sessions", kpi["active_sessions"])
+    c3.metric("Messages", kpi["total_messages"])
+    c4.metric("Tool Calls", kpi["total_tool_calls"])
+    c5.metric("Errors", kpi["total_errors"], delta_color="inverse")
+    c6.metric("Est. Cost", f"${kpi['estimated_cost_usd']:.4f}")
 
-active_users = analytics.get_active_users(hours=time_range)
-total_sessions = analytics.get_total_sessions(hours=time_range)
-error_count = analytics.get_error_count(hours=time_range)
-token_usage = analytics.get_total_token_usage(hours=time_range)
+    st.divider()
 
-with col1:
-    st.metric("Active Users", len(active_users))
+    col_left, col_right = st.columns([2, 1])
 
-with col2:
-    st.metric("Total Sessions", total_sessions)
+    with col_left:
+        st.subheader("Hourly message activity")
+        hourly = analytics.get_hourly_activity(hours)
+        if hourly:
+            df_h = pd.DataFrame(hourly)
+            df_h["hour"] = pd.to_datetime(df_h["hour"])
+            df_h = df_h.set_index("hour")
+            st.bar_chart(df_h["messages"])
+        else:
+            st.info("No message data for this window.")
 
-with col3:
-    st.metric("Errors", error_count, delta_color="inverse")
+    with col_right:
+        st.subheader("Token usage")
+        st.metric("Input tokens", f"{kpi['input_tokens']:,}")
+        st.metric("Output tokens", f"{kpi['output_tokens']:,}")
+        total = kpi["input_tokens"] + kpi["output_tokens"]
+        st.metric("Total tokens", f"{total:,}")
+        st.caption(
+            "Pricing: $0.15 / 1M input · $0.60 / 1M output (gpt-4o-mini)"
+        )
 
-with col4:
-    st.metric("Total Tokens", f"{token_usage['total']:,}")
+# ============================================================
+# TAB 2 — USERS
+# ============================================================
 
-st.divider()
+with tab_users:
+    users = analytics.get_user_breakdown(hours)
 
-# ---------------------------------------------------------------------------
-# Tool usage and performance
-# ---------------------------------------------------------------------------
-
-col1, col2 = st.columns(2)
-
-with col1:
-    st.subheader("🔧 Tool Usage")
-    tool_stats = analytics.get_tool_usage_stats(hours=time_range)
-
-    if tool_stats:
-        # Sort by usage count
-        sorted_tools = sorted(tool_stats.items(), key=lambda x: x[1], reverse=True)
-
-        for tool_name, count in sorted_tools:
-            st.metric(tool_name, count)
+    if not users:
+        st.info("No user activity in this time window.")
     else:
-        st.info("No tool usage data available for this time range.")
+        df_u = pd.DataFrame(users)
+        df_u["cost_usd"] = df_u.apply(
+            lambda r: analytics._cost(r["input_tokens"], r["output_tokens"]), axis=1
+        )
+        df_u["last_seen"] = pd.to_datetime(df_u["last_seen"]).dt.strftime(
+            "%Y-%m-%d %H:%M"
+        )
 
-with col2:
-    st.subheader("⚡ Performance")
+        st.dataframe(
+            df_u[
+                [
+                    "user_id", "sessions", "messages",
+                    "tool_calls", "total_tokens", "cost_usd", "last_seen",
+                ]
+            ],
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "user_id": "User",
+                "sessions": st.column_config.NumberColumn("Sessions"),
+                "messages": st.column_config.NumberColumn("Messages"),
+                "tool_calls": st.column_config.NumberColumn("Tool Calls"),
+                "total_tokens": st.column_config.NumberColumn("Tokens"),
+                "cost_usd": st.column_config.NumberColumn("Cost (USD)", format="$%.4f"),
+                "last_seen": "Last Seen",
+            },
+        )
 
-    avg_response_time = analytics.get_average_response_time(hours=time_range)
-    st.metric("Avg Response Time", f"{avg_response_time:.2f}s")
+        st.divider()
+        st.subheader("Session drill-down")
 
-    st.caption("Token Breakdown")
-    st.metric("Prompt Tokens", f"{token_usage['prompt']:,}")
-    st.metric("Completion Tokens", f"{token_usage['completion']:,}")
+        user_ids = [r["user_id"] for r in users]
+        selected_user = st.selectbox("Select user", user_ids)
 
-st.divider()
+        if selected_user:
+            sessions = analytics.get_recent_sessions(hours=hours * 4, limit=20)
+            user_sessions = [s for s in sessions if s["user_id"] == selected_user]
 
-# ---------------------------------------------------------------------------
-# User activity
-# ---------------------------------------------------------------------------
+            if not user_sessions:
+                st.info("No sessions found for this user.")
+            else:
+                session_labels = {
+                    s["session_id"]: (
+                        f"{s['session_id'][:12]}…  |  {s['filename']}  |  "
+                        f"{s['message_count']} msgs  |  {s['status']}"
+                    )
+                    for s in user_sessions
+                }
+                chosen = st.selectbox(
+                    "Select session",
+                    options=list(session_labels.keys()),
+                    format_func=lambda k: session_labels[k],
+                )
 
-st.subheader("👥 User Activity")
+                if chosen:
+                    msgs = analytics.get_session_messages(chosen)
+                    if msgs:
+                        for m in msgs:
+                            role = m["role"]
+                            icon = "🧑" if role == "user" else "🤖"
+                            with st.chat_message(role):
+                                st.markdown(f"{icon} **{role}**")
+                                st.write(m["content"])
+                                if m.get("response_ms"):
+                                    st.caption(f"{m['response_ms']:.0f} ms")
 
-user_activity = analytics.get_user_activity(hours=time_range)
+                                # Render artifacts (plots, tables, code) in foldable expanders
+                                artifacts = m.get("artifacts", [])
+                                for i, art in enumerate(artifacts):
+                                    atype = art["artifact_type"]
+                                    title = art.get("title") or f"{atype} {i + 1}"
+                                    label = f"{'📊' if atype == 'plot' else '📋'} {title[:80]}"
 
-if user_activity:
-    # Display as table
-    st.dataframe(
-        user_activity,
-        use_container_width=True,
-        hide_index=True,
-        column_config={
-            "user_id": "User ID",
-            "messages": st.column_config.NumberColumn("Messages", format="%d"),
-            "tools": st.column_config.NumberColumn("Tool Calls", format="%d"),
-            "sessions": st.column_config.NumberColumn("Sessions", format="%d"),
-        },
-    )
-else:
-    st.info("No user activity data available for this time range.")
+                                    with st.expander(label, expanded=False):
+                                        if art.get("code"):
+                                            st.code(art["code"], language="python")
 
-st.divider()
+                                        if atype == "plot" and art.get("image_b64"):
+                                            import base64, io
+                                            img_bytes = base64.b64decode(art["image_b64"])
+                                            st.image(io.BytesIO(img_bytes), use_container_width=True)
 
-# ---------------------------------------------------------------------------
-# Recent errors
-# ---------------------------------------------------------------------------
+                                        elif atype == "table":
+                                            if art.get("display_df"):
+                                                st.markdown(art["display_df"])
+                                            if art.get("csv_data"):
+                                                st.download_button(
+                                                    label="📥 Download CSV",
+                                                    data=art["csv_data"],
+                                                    file_name=f"nvwa_export_{chosen[:8]}_{i}.csv",
+                                                    mime="text/csv",
+                                                    key=f"dl_{chosen}_{m['id']}_{i}",
+                                                )
+                    else:
+                        st.info("No messages recorded for this session.")
 
-st.subheader("🚨 Recent Errors")
+# ============================================================
+# TAB 3 — TOOLS
+# ============================================================
 
-recent_errors = analytics.get_recent_errors(limit=10)
+with tab_tools:
+    tool_stats = analytics.get_tool_stats(hours)
 
-if recent_errors:
-    for error in recent_errors:
-        with st.expander(
-            f"⚠️ {error['tool_name']} - {error['timestamp'][:19]}",
-            expanded=False,
-        ):
-            st.text(f"User: {error['user_id']}")
-            st.text(f"Session: {error['session_id']}")
-            st.code(error['error'], language="text")
-else:
-    st.success("No errors in this time range! 🎉")
+    if not tool_stats:
+        st.info("No tool execution data for this time window.")
+    else:
+        df_t = pd.DataFrame(tool_stats)
+        df_t["error_rate"] = (df_t["errors"] / df_t["total_calls"] * 100).round(1)
+
+        col_left, col_right = st.columns([2, 1])
+
+        with col_left:
+            st.subheader("Call count by tool")
+            df_chart = df_t.set_index("tool_name")[["total_calls"]].sort_values(
+                "total_calls"
+            )
+            st.bar_chart(df_chart)
+
+        with col_right:
+            st.subheader("Summary")
+            st.metric("Distinct tools used", len(df_t))
+            most_used = df_t.iloc[0]["tool_name"] if len(df_t) else "—"
+            st.metric("Most-called tool", most_used)
+            error_tools = df_t[df_t["errors"] > 0]
+            st.metric("Tools with errors", len(error_tools))
+
+        st.divider()
+        st.subheader("Full tool table")
+        st.dataframe(
+            df_t[["tool_name", "total_calls", "errors", "error_rate", "avg_ms", "max_ms"]],
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "tool_name": "Tool",
+                "total_calls": st.column_config.NumberColumn("Calls"),
+                "errors": st.column_config.NumberColumn("Errors"),
+                "error_rate": st.column_config.NumberColumn("Error %", format="%.1f%%"),
+                "avg_ms": st.column_config.NumberColumn("Avg ms"),
+                "max_ms": st.column_config.NumberColumn("Max ms"),
+            },
+        )
+
+        st.divider()
+        st.subheader("🚨 Recent errors")
+        errors = analytics.get_recent_errors(hours)
+        if errors:
+            for err in errors:
+                ts = str(err["created_at"])[:19]
+                label = f"{err['tool_name']}  ·  {err['user_id']}  ·  {ts}"
+                with st.expander(label, expanded=False):
+                    st.caption(f"Session: {err['session_id']}")
+                    st.code(err["error_preview"] or "", language="text")
+        else:
+            st.success("No errors in this window! 🎉")
+
+# ============================================================
+# TAB 4 — SESSIONS
+# ============================================================
+
+with tab_sessions:
+    sessions = analytics.get_recent_sessions(hours, limit=50)
+
+    if not sessions:
+        st.info("No sessions started in this time window.")
+    else:
+        df_s = pd.DataFrame(sessions)
+        df_s["created_at"] = pd.to_datetime(df_s["created_at"]).dt.strftime(
+            "%Y-%m-%d %H:%M"
+        )
+        df_s["duration"] = df_s["duration_seconds"].apply(
+            lambda s: f"{s // 60}m {s % 60}s" if s is not None else "—"
+        )
+
+        st.dataframe(
+            df_s[
+                [
+                    "created_at", "user_id", "filename",
+                    "message_count", "duration", "status",
+                ]
+            ],
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "created_at": "Started",
+                "user_id": "User",
+                "filename": "Dataset",
+                "message_count": st.column_config.NumberColumn("Messages"),
+                "duration": "Duration",
+                "status": "Status",
+            },
+        )
+
+# ============================================================
+# TAB 5 — FEEDBACK
+# ============================================================
+
+with tab_feedback:
+    st.header("💬 User Feedback")
+
+    stats = analytics.get_feedback_stats(hours)
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Total Responses", int(stats["total_responses"]))
+    with col2:
+        avg_score = stats["avg_score"] or 0
+        st.metric("Average Score", f"{avg_score:.2f} / 5")
+    with col3:
+        positive = int(stats["positive_count"])
+        total = int(stats["total_responses"])
+        pct = (positive / total * 100) if total > 0 else 0
+        st.metric("Positive (4-5★)", f"{positive} ({pct:.0f}%)")
+
+    st.divider()
+
+    feedback = analytics.get_feedback_responses(hours)
+    if feedback:
+        df = pd.DataFrame(feedback)
+        st.dataframe(
+            df,
+            use_container_width=True,
+            column_config={
+                "response_id": "ID",
+                "created_at": "Date",
+                "user_id": "User",
+                "session_id": "Session",
+                "q1_score": st.column_config.NumberColumn("Score", format="%d ⭐"),
+                "q2_time_saved": "Time Saved",
+                "q3_open_text": "Comments",
+            },
+        )
+    else:
+        st.info("No feedback responses in this time window.")
 
 # ---------------------------------------------------------------------------
 # Auto-refresh
 # ---------------------------------------------------------------------------
 
-st.divider()
-st.caption("Dashboard auto-refreshes every 30 seconds")
-
-# Auto-refresh every 30 seconds
-import time
-time.sleep(30)
-st.rerun()
-
+if auto_refresh:
+    import time
+    st.divider()
+    st.caption("Auto-refreshing every 30 seconds…")
+    time.sleep(30)
+    st.rerun()

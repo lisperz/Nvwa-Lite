@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -14,8 +15,8 @@ UPLOAD_DIR = Path("data/uploads")
 MAX_UPLOAD_MB = 2000
 
 
-def file_upload_widget() -> Path | None:
-    """Sidebar widget for .h5ad file upload. Returns path or None."""
+def file_upload_widget(user_id: str | None = None, session_id: str | None = None) -> tuple[Path | None, str | None]:
+    """Sidebar widget for .h5ad file upload. Returns (local_path, s3_key) or (None, None)."""
     with st.sidebar:
         st.subheader("Upload Data")
         st.caption(f"Max file size: {MAX_UPLOAD_MB} MB")
@@ -32,13 +33,29 @@ def file_upload_widget() -> Path | None:
                     f"File too large ({file_size_mb:.0f} MB). "
                     f"Maximum allowed: {MAX_UPLOAD_MB} MB."
                 )
-                return None
+                return None, None
+
+            # Save locally first (for immediate loading)
             UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
             dest = UPLOAD_DIR / uploaded.name
             dest.write_bytes(file_bytes)
+
+            # Upload to S3 if configured and user/session provided
+            s3_key = None
+            if user_id and session_id and os.getenv("S3_BUCKET_NAME"):
+                try:
+                    from src.storage.service import S3StorageService
+                    s3_service = S3StorageService(
+                        bucket_name=os.getenv("S3_BUCKET_NAME"),
+                        region=os.getenv("AWS_REGION", "us-east-2")
+                    )
+                    s3_key = s3_service.upload_file(user_id, session_id, file_bytes, uploaded.name, "upload")
+                except Exception as e:
+                    st.warning(f"S3 upload failed (using local storage): {e}")
+
             st.success(f"Uploaded: {uploaded.name} ({file_size_mb:.1f} MB)")
-            return dest
-    return None
+            return dest, s3_key
+    return None, None
 
 
 def pipeline_panel(state: DatasetState | None) -> None:

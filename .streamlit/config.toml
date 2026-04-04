@@ -4,6 +4,7 @@ maxMessageSize = 2000
 headless = true
 enableCORS = false
 enableXsrfProtection = true
+baseUrlPath = "/app"
 
 [browser]
 gatherUsageStats = false
