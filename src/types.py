@@ -79,7 +79,7 @@ def detect_dataset_state(
     state.has_umap = "X_umap" in adata.obsm
 
     # Detect clustering key (self-healing logic)
-    for key in ("leiden", "louvain"):
+    for key in ("leiden", "louvain", "seurat_clusters", "cluster", "clusters"):
         if key in adata.obs.columns:
             state.has_clustering = True
             state.cluster_key = key
