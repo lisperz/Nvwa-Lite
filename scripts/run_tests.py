@@ -66,7 +66,7 @@ def _check_deps() -> None:
         sys.exit(2)
 
 
-DEFAULT_CONFIG = REPO_ROOT / "tests" / "tests.yaml"
+DEFAULT_CONFIG = REPO_ROOT / "tests" / "integration" / "tests.yaml"
 DEFAULT_REPORT_DIR = REPO_ROOT / "reports"
 DEFAULT_MODEL = "gpt-4o-mini"
 
