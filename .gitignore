@@ -22,11 +22,9 @@ data/uploads/
 # OS
 .DS_Store
 
-# Internal planning documents (local only)
-discuss/
-docs/
+# everything not shared (local only)
+local/
 
 # Pilot tokens (contains sensitive authentication data)
 pilot_tokens.json
 pilot_tokens.env
-reports/
