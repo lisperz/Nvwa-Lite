@@ -25,10 +25,16 @@ def run_migration(sql_file: Path) -> None:
 
 if __name__ == "__main__":
     migrations_dir = Path(__file__).parent.parent / "migrations"
-    migration_file = migrations_dir / "001_add_s3_key_to_artifacts.sql"
 
-    if not migration_file.exists():
-        print(f"ERROR: Migration file not found: {migration_file}")
+    # Run all migrations in order
+    migrations = sorted(migrations_dir.glob("*.sql"))
+
+    if not migrations:
+        print("No migration files found")
         sys.exit(1)
 
-    run_migration(migration_file)
+    for migration_file in migrations:
+        run_migration(migration_file)
+
+    print("\n✓ All migrations completed successfully")
+
