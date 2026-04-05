@@ -1,8 +1,61 @@
-# Session Summary — 2026-04-03 (Latest Update)
+# Session Summary — 2026-04-04 (Latest Update)
 
-# Session Summary — 2026-04-03 (Latest Update)
+## Session Summary — 2026-04-04
 
-## Recent Changes This Session (2026-04-03)
+### 1. Pushed Production Snapshot to Shared Repo (yzhou-nvwa/nvwa-mvp) ✅
+
+**Context:** The other developer (Yuxin Chen / chenyux3) has a shared GitHub repo at `https://github.com/yzhou-nvwa/nvwa-mvp` that is intended to become the canonical deployed repo. Chen's local production code needed to be pushed there for comparison and reconciliation.
+
+**What was done:**
+- Remote `boss` already pointed to `https://github.com/yzhou-nvwa/nvwa-mvp.git`
+- Created branch `reconcile-from-production` from local `main`
+- Committed previously uncommitted local production files (nginx config, scripts, docs, discuss)
+- Excluded: `src/monitoring/dashboard.py.tmp` (temp), `src/ui/feedback_widget.py` (deprecated)
+- Pushed to `boss/reconcile-from-production`
+- Opened PR #3: https://github.com/yzhou-nvwa/nvwa-mvp/pull/3 (review only, not for direct merge)
+
+**Files committed in that branch beyond origin/main:**
+- `nginx/landing_ssl.conf` — WebSocket keepalive, upload size, SSL proxy settings
+- `.env.example` — session management env vars
+- `Dockerfile` — production tweaks
+- `scripts/` — SSL setup, swap space, resource monitoring, EC2 deploy scripts
+- `docs/` — CLOUDFLARE_521_FIX, CONCURRENCY_SCALING, FEEDBACK_WIDGET, FIX_SSL_MODE
+- `discuss/` — architecture proposals, bug fix notes, roadmap documents
+
+---
+
+### 2. Reviewed Conflict Resolution in PR #4 (yzhou-nvwa/nvwa-mvp) ✅ CONFIRMED
+
+**Context:** Yuxin Chen (chenyux3) created PR #4 (`merge/chen-reconcile` → `main`) to reconcile Chen's production snapshot with their main branch (which had a regression test harness + task router). He asked Chen to confirm `src/agent/` conflict resolutions.
+
+**PR #4:** https://github.com/yzhou-nvwa/nvwa-mvp/pull/4
+
+**Analysis performed:** Diffed `reconcile-from-production` vs `boss/merge/chen-reconcile` for all `src/agent/` files.
+
+**Results:**
+
+| File | Status | Detail |
+|---|---|---|
+| `core.py` | ✅ Identical to production | No changes |
+| `tools.py` | ✅ Identical to production | No changes |
+| `analysis_tools.py` | ✅ Confirmed OK | Added `seurat_clusters`, `cluster`, `clusters` to `_get_cluster_key()` fallback list |
+| `prompts.py` | ✅ Confirmed OK | 3 additions: gene-missing behavior now requires STOP + user confirmation before retrying |
+| `router.py` | 🆕 New file (their addition) | Rule-based intent classifier, not yet wired into core.py |
+
+**Key prompts.py changes (their additions on top of Chen's version):**
+- Gene Search intent mapping: "STOP — report error, list 1–3 alternatives, do NOT auto-select"
+- Resilience Protocol: "STOP immediately. Do NOT retry with a different gene."
+- Self-Healing split: gene-missing → stop + ask user; other failures → self-heal as before
+
+**Confirmed and approved.** Yuxin will merge PR #4.
+
+**Status:** ⏳ Waiting for Yuxin to merge PR #4 and make `yzhou-nvwa/nvwa-mvp` the canonical deployed repo.
+
+**Note on GitHub diff UI:** The `prompts.py` changes appear buried in a large green block in the GitHub PR view because the entire file was new relative to `boss/main`. The precise diff was extracted by comparing the two branches directly locally.
+
+---
+
+## Previous Session Changes (2026-04-03)
 
 ### 4. Cell Composition Cross-Tabulation Bug Fix ✅ DEPLOYED (PR #4)
 
