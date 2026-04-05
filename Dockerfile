@@ -22,7 +22,7 @@ RUN mkdir -p logs data/uploads
 
 EXPOSE 8501
 
-HEALTHCHECK CMD curl --fail http://localhost:8501/_stcore/health || exit 1
+HEALTHCHECK CMD curl --fail http://localhost:8501/app/_stcore/health || exit 1
 
 CMD ["uv", "run", "streamlit", "run", "src/ui/app.py", \
      "--server.port=8501", "--server.address=0.0.0.0", \

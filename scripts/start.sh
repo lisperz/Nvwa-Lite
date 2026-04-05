@@ -15,6 +15,13 @@ if [ ! -d ".venv" ]; then
     uv sync
 fi
 
+# Load .env if present
+if [ -f ".env" ]; then
+    set -a
+    source .env
+    set +a
+fi
+
 echo "Starting Nvwa-Lite..."
 uv run streamlit run src/ui/app.py \
     --server.port=8501 \

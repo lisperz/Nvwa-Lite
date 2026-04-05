@@ -6,6 +6,7 @@ error handling, and structured output for the agent.
 
 from __future__ import annotations
 
+import io
 import logging
 from typing import TYPE_CHECKING, Callable
 
@@ -13,12 +14,15 @@ import pandas as pd
 from langchain_core.tools import tool
 
 from src.agent import analysis_tools
+from src.agent.viz_state import update_viz_state
 from src.analysis.calculations import calculate_mito_percentage, get_metadata_summary
+from src.analysis.composition import cross_tabulate_metadata
 from src.analysis.differential import get_de_dataframe, run_differential_expression, run_pairwise_de, get_all_de_results
 from src.analysis.marker_genes import get_top_marker_genes_per_cluster
 from src.analysis.preprocessing import run_preprocessing
 from src.analysis.qc_metrics import get_obs_column_statistics, resolve_qc_metric_column, summarize_qc_metrics
 from src.plotting.comparison import plot_dotplot, plot_heatmap, plot_scatter
+from src.plotting.composition import plot_composition
 from src.plotting.executor import PlotResult, TableResult, plot_feature, plot_umap, plot_violin
 from src.plotting.volcano import plot_volcano
 from src.types import DatasetState, detect_dataset_state
@@ -33,6 +37,7 @@ _dataset_state: DatasetState | None = None
 _plot_results: list[PlotResult] = []
 _table_results: list[TableResult] = []
 _adata_replaced_callback: Callable[[AnnData], None] | None = None
+_plot_generated_callback: Callable[[], None] | None = None
 
 
 def bind_dataset(adata: AnnData) -> None:
@@ -53,6 +58,12 @@ def set_adata_replaced_callback(cb: Callable[[AnnData], None]) -> None:
     """Register a callback invoked when preprocessing replaces adata."""
     global _adata_replaced_callback  # noqa: PLW0603
     _adata_replaced_callback = cb
+
+
+def set_plot_generated_callback(cb: Callable[[], None]) -> None:
+    """Register a callback invoked when any plot is generated."""
+    global _plot_generated_callback  # noqa: PLW0603
+    _plot_generated_callback = cb
 
 
 def _get_adata() -> AnnData:
@@ -88,6 +99,12 @@ def _update_state() -> None:
 def _store_and_return(result: PlotResult) -> str:
     """Append a PlotResult to the buffer and return a text summary."""
     _plot_results.append(result)
+    logger.info(f"[FEEDBACK] _store_and_return called, callback exists: {_plot_generated_callback is not None}")
+    if _plot_generated_callback:
+        logger.info("[FEEDBACK] Invoking plot generated callback")
+        _plot_generated_callback()
+    else:
+        logger.warning("[FEEDBACK] No plot generated callback registered!")
     return f"Plot generated successfully.\nCode: {result.code}\n{result.message}"
 
 
@@ -138,10 +155,13 @@ def umap_plot(color_by: str, show_labels: bool = False, show_legend: bool = True
         split_by = _get_cluster_key()
 
     try:
-        return _store_and_return(plot_umap(
+        result = _store_and_return(plot_umap(
             adata, color=color_by, show_labels=show_labels, show_legend=show_legend,
             split_by=split_by if split_by else None
         ))
+        update_viz_state("umap", color_by=color_by, split_by=split_by or None,
+                         show_labels=show_labels, show_legend=show_legend)
+        return result
     except ValueError as e:
         return f"Error: {e}"
     except Exception as e:
@@ -170,7 +190,10 @@ def violin_plot(genes: str, groupby: str = "") -> str:
             gene_list = [g.strip() for g in genes.split(",")]
         else:
             gene_list = genes.strip()
-        return _store_and_return(plot_violin(adata, genes=gene_list, groupby=groupby))
+        result = _store_and_return(plot_violin(adata, genes=gene_list, groupby=groupby))
+        genes_list = gene_list if isinstance(gene_list, list) else [gene_list]
+        update_viz_state("violin", groupby=groupby, genes=genes_list)
+        return result
     except ValueError as e:
         return f"Error: {e}"
     except Exception as e:
@@ -194,7 +217,9 @@ def dotplot(genes: str, groupby: str = "") -> str:
 
     gene_list = [g.strip() for g in genes.split(",")]
     try:
-        return _store_and_return(plot_dotplot(adata, genes=gene_list, groupby=groupby))
+        result = _store_and_return(plot_dotplot(adata, genes=gene_list, groupby=groupby))
+        update_viz_state("dotplot", groupby=groupby, genes=gene_list)
+        return result
     except ValueError as e:
         return f"Error: {e}"
     except Exception as e:
@@ -211,7 +236,9 @@ def feature_plot(gene: str) -> str:
     """
     adata = _get_adata()
     try:
-        return _store_and_return(plot_feature(adata, gene=gene))
+        result = _store_and_return(plot_feature(adata, gene=gene))
+        update_viz_state("feature", genes=[gene])
+        return result
     except ValueError as e:
         return f"Error: {e}"
     except Exception as e:
@@ -236,9 +263,11 @@ def heatmap_plot(genes: str, groupby: str = "", n_genes_per_cluster: int = 0) ->
 
     gene_list = [g.strip() for g in genes.split(",")]
     try:
-        return _store_and_return(plot_heatmap(
+        result = _store_and_return(plot_heatmap(
             adata, genes=gene_list, groupby=groupby, n_genes_per_cluster=n_genes_per_cluster
         ))
+        update_viz_state("heatmap", groupby=groupby, genes=gene_list)
+        return result
     except ValueError as e:
         return f"Error: {e}"
     except Exception as e:
@@ -258,7 +287,9 @@ def scatter_plot(gene_x: str, gene_y: str, color_by: str = "") -> str:
     adata = _get_adata()
     try:
         color = color_by if color_by else None
-        return _store_and_return(plot_scatter(adata, gene_x=gene_x, gene_y=gene_y, color_by=color))
+        result = _store_and_return(plot_scatter(adata, gene_x=gene_x, gene_y=gene_y, color_by=color))
+        update_viz_state("scatter", color_by=color_by or None, genes=[gene_x, gene_y])
+        return result
     except ValueError as e:
         return f"Error: {e}"
     except Exception as e:
@@ -383,6 +414,108 @@ def inspect_metadata(max_unique_values: int = 50) -> str:
     except Exception as e:
         logger.exception("Metadata inspection failed")
         return f"Error inspecting metadata: {e}"
+
+
+@tool
+def composition_analysis(
+    row_key: str,
+    col_key: str,
+    show_percentages: bool = False,
+    plot_only: bool = False,
+) -> str:
+    """Analyze cell composition across two categorical variables.
+
+    This tool computes the cross-tabulation ONCE and returns BOTH:
+    1. Exact count table (with CSV download)
+    2. Stacked bar chart visualization
+
+    This ensures the numbers in the table match the plot exactly, preventing
+    any discrepancies or "cannot access data" errors.
+
+    Use this for queries like:
+    - "How many cells per cell type in each condition?"
+    - "Show me the composition"
+    - "Cell type distribution across samples"
+
+    IMPORTANT: Do NOT call this if the composition table was already displayed
+    in a previous turn. Instead, refer the user to the existing table.
+
+    This is equivalent to Seurat's:
+    obj@meta.data %>% group_by(row_key, col_key) %>% summarise(n=n())
+
+    Args:
+        row_key: Metadata column for rows (e.g., 'orig.ident', 'condition').
+        col_key: Metadata column for columns (e.g., 'cell_type', 'leiden').
+        show_percentages: If True, also show percentage table.
+        plot_only: If True, skip table output (for plot-only requests).
+
+    Returns:
+        Both table and plot results with exact numbers visible to agent.
+    """
+    adata = _get_adata()
+
+    try:
+        # SINGLE SOURCE OF TRUTH - compute once
+        crosstab_counts = cross_tabulate_metadata(adata, row_key, col_key, normalize=False)
+
+        results = []
+
+        # 1. Store and return count table (unless plot_only)
+        if not plot_only:
+            csv_buffer = io.StringIO()
+            crosstab_counts.to_csv(csv_buffer)
+
+            table_result = TableResult(
+                csv_data=csv_buffer.getvalue(),
+                code=f'composition_analysis(adata, "{row_key}", "{col_key}")',
+                message=f"Cell counts: {col_key} across {row_key}",
+                display_df=crosstab_counts.to_markdown(),
+            )
+            _store_table_and_return(table_result)
+
+        # 2. Optionally show percentages
+        if show_percentages and not plot_only:
+            crosstab_pct = cross_tabulate_metadata(adata, row_key, col_key, normalize=True)
+            csv_buffer_pct = io.StringIO()
+            crosstab_pct.to_csv(csv_buffer_pct)
+
+            table_result_pct = TableResult(
+                csv_data=csv_buffer_pct.getvalue(),
+                code=f'composition_analysis(adata, "{row_key}", "{col_key}", show_percentages=True)',
+                message=f"Cell percentages: {col_key} across {row_key}",
+                display_df=crosstab_pct.round(2).to_markdown(),
+            )
+            _store_table_and_return(table_result_pct)
+
+        # 3. Generate plot from the SAME data
+        plot_result = plot_composition(
+            crosstab=crosstab_counts, row_key=row_key, col_key=col_key, kind="count"
+        )
+        _store_and_return(plot_result)
+
+        # 4. Return a SHORT confirmation to the agent — no raw data dumps
+        # The UI will render the table and plot separately
+        output = (
+            f"Composition analysis complete for {col_key} across {row_key}.\n"
+            f"- Count table: displayed with CSV download button\n"
+            f"- Stacked bar chart: displayed\n"
+        )
+        if show_percentages:
+            output += "- Percentage table: displayed with CSV download button\n"
+        output += (
+            "\nThe exact cell counts are shown in the table above. "
+            "If the user asks for exact numbers, refer them to the displayed table and CSV download. "
+            "Do NOT regenerate the analysis — just reference the existing results."
+        )
+
+        update_viz_state("composition", row_key=row_key, col_key=col_key)
+        return output
+
+    except ValueError as e:
+        return f"Error: {e}"
+    except Exception as e:
+        logger.exception("Composition analysis failed")
+        return f"Unexpected error: {e}"
 
 
 @tool
@@ -638,11 +771,19 @@ def get_top_markers(n_genes_per_cluster: int = 10, groupby: str = "") -> str:
         groupby = _get_cluster_key()
 
     try:
+        from src.analysis.marker_genes import get_top_marker_genes_per_cluster_exact
+
+        cluster_genes = get_top_marker_genes_per_cluster_exact(
+            adata, n_genes=n_genes_per_cluster, groupby=groupby
+        )
         genes = get_top_marker_genes_per_cluster(adata, n_genes=n_genes_per_cluster, groupby=groupby)
 
-        result = f"Top {n_genes_per_cluster} marker genes per cluster:\n"
-        result += f"Total unique genes: {len(genes)}\n\n"
-        result += "Genes (comma-separated for heatmap):\n"
+        # Show per-cluster breakdown so the agent knows ALL genes must be used
+        result = f"Top {n_genes_per_cluster} marker genes per cluster ({len(cluster_genes)} clusters):\n\n"
+        for cluster, cluster_gene_list in cluster_genes.items():
+            result += f"  {cluster}: {', '.join(cluster_gene_list)}\n"
+        result += f"\nTotal unique genes: {len(genes)}\n"
+        result += "IMPORTANT: Use ALL genes below for dotplot/heatmap (not just one cluster's genes):\n"
         result += ",".join(genes)
 
         return result
@@ -1119,7 +1260,7 @@ def get_all_tools() -> list:
         umap_plot, violin_plot, dotplot, feature_plot,
         heatmap_plot, scatter_plot, volcano_plot_tool,
         # Core tools
-        dataset_info, check_data_status, inspect_metadata,
+        dataset_info, check_data_status, inspect_metadata, composition_analysis,
         preprocess_data, differential_expression, get_cluster_degs, compare_groups_de, get_top_markers,
         # QC and statistics tools
         calculate_mito_pct, summarize_obs_column, summarize_qc_metrics_tool,
