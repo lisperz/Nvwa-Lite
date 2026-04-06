@@ -228,6 +228,72 @@ def dotplot(genes: str, groupby: str = "") -> str:
 
 
 @tool
+def dotplot_combined(genes: str, row_key: str, col_key: str) -> str:
+    """Generate a dot plot showing gene expression across TWO dimensions simultaneously.
+
+    This creates a combined grouping (row_key × col_key) to show how expression
+    varies across both dimensions at once. Equivalent to Seurat's pattern:
+    obj.obs["combined"] = obj.obs["row_key"] + " + " + obj.obs["col_key"]
+
+    Use this for queries like:
+    - "Show MKI67 across cell types and conditions"
+    - "How does gene X vary by cell type in each sample?"
+
+    Args:
+        genes: Comma-separated gene names (e.g. 'MKI67,CD3E').
+        row_key: First dimension metadata column (e.g., 'cell_type').
+        col_key: Second dimension metadata column (e.g., 'orig.ident').
+
+    Returns:
+        Dot plot with combined grouping showing both dimensions.
+    """
+    adata = _get_adata()
+
+    # Validate columns exist
+    if row_key not in adata.obs.columns:
+        return f"Error: '{row_key}' not found in observations. Available: {', '.join(adata.obs.columns)}"
+    if col_key not in adata.obs.columns:
+        return f"Error: '{col_key}' not found in observations. Available: {', '.join(adata.obs.columns)}"
+
+    gene_list = [g.strip() for g in genes.split(",")]
+    combined_key = f"{row_key}_x_{col_key}"
+
+    try:
+        # Create combined grouping column
+        adata.obs[combined_key] = (
+            adata.obs[row_key].astype(str) + " + " + adata.obs[col_key].astype(str)
+        )
+
+        # Generate dotplot with combined grouping
+        result = plot_dotplot(adata, genes=gene_list, groupby=combined_key)
+
+        # Clean up temporary column
+        del adata.obs[combined_key]
+
+        # Enhance result with context
+        enhanced_result = PlotResult(
+            image=result.image,
+            code=f'# Combined grouping: {row_key} × {col_key}\n' + result.code,
+            message=f"Dot plot of {', '.join(gene_list)} across {row_key} × {col_key} (combined grouping)."
+        )
+
+        result_str = _store_and_return(enhanced_result)
+        update_viz_state("dotplot_combined", row_key=row_key, col_key=col_key, genes=gene_list)
+        return result_str
+
+    except ValueError as e:
+        # Clean up on error
+        if combined_key in adata.obs.columns:
+            del adata.obs[combined_key]
+        return f"Error: {e}"
+    except Exception as e:
+        logger.exception("Combined dot plot failed")
+        if combined_key in adata.obs.columns:
+            del adata.obs[combined_key]
+        return f"Unexpected error: {e}"
+
+
+@tool
 def feature_plot(gene: str) -> str:
     """Generate a feature plot showing gene expression on UMAP (viridis colormap).
 
@@ -1257,7 +1323,7 @@ def get_all_tools() -> list:
     """Return all tools for the agent."""
     return [
         # Plotting tools
-        umap_plot, violin_plot, dotplot, feature_plot,
+        umap_plot, violin_plot, dotplot, dotplot_combined, feature_plot,
         heatmap_plot, scatter_plot, volcano_plot_tool,
         # Core tools
         dataset_info, check_data_status, inspect_metadata, composition_analysis,

@@ -1,5 +1,52 @@
 # Session Summary — 2026-04-05 (Latest Update)
 
+## Session Summary — 2026-04-05 (Part 2)
+
+### Fix: Gene Expression Dimension Confusion — Cell Type vs Condition vs Cluster ✅ LOCAL TESTED
+
+**Problem (from reviewer feedback):**
+Agent made multiple critical errors when handling MKI67 expression queries:
+1. Answered "which cell type" with a condition name (PA-IVS-1v-D5) — wrong dimension
+2. Answered "which cell type" with "Cluster 3" — wrong dimension
+3. After explicit user correction ("I asked cell type, not cluster"), answered "Cluster 11" — inconsistent, still wrong
+4. Only generated one violin plot (by cell type), missing a condition-aware visualization
+5. No multi-dimensional dotplot combining cell type × condition
+
+**Root Causes:**
+1. No intent mapping for gene expression dimension queries — agent had no guidance on mapping "cell type" / "condition" / "cluster" words to correct metadata columns
+2. `find_highest_expression()` always defaulted to cluster column, ignoring user's stated dimension
+3. No multi-dimensional visualization tool — reviewer suggested `cell_type + orig.ident` combined grouping pattern
+4. No answer consistency check — agent could answer with wrong dimension and contradict itself across turns
+
+**Solution (3 files):**
+
+- **`src/agent/prompts.py`** — Added two new protocol sections:
+  1. `GENE EXPRESSION ANALYSIS INTENT MAPPING` — explicit rules mapping "cell type" → annotation columns, "condition" → sample columns, "cluster" → cluster columns; specifies that multi-dimensional queries ("across cell types AND conditions") require generating BOTH violin plots; specifies correct `groupby` for "which [dimension]" questions
+  2. `ANSWER CONSISTENCY PROTOCOL` — rules requiring the tool call `groupby` to match the user's stated dimension; worked examples of correct vs incorrect flow; recovery protocol when user corrects the agent
+
+- **`src/agent/tools.py`** — Added `dotplot_combined(genes, row_key, col_key)`:
+  - Creates a combined grouping column (`row_key + " + " + col_key`) temporarily on `adata.obs`
+  - Generates a dotplot grouped by the combined key (e.g., "B cells + PA-IVS-1v-D5")
+  - Cleans up the temporary column after plotting
+  - Equivalent to the reviewer's suggested Seurat pattern
+  - Added to `get_all_tools()` list (28 tools total)
+
+- **`src/agent/analysis_tools.py`** — Enhanced `find_highest_expression()`:
+  - Added dimension detection: inspects `groupby` column name to classify as "cell type" / "condition/sample" / "cluster" / "group"
+  - Tool output now includes explicit dimension label and IMPORTANT block telling the agent which dimension the answer is in
+  - Logs a warning when `groupby` is auto-detected (may not match user intent)
+
+**Testing (local verified):**
+- "Show MKI67 across cell types and conditions" → generates two violin plots + optional combined dotplot ✓
+- "Which cell type expresses MKI67 highest?" → calls `find_highest_expression(groupby="cell_type")`, answers with cell type name ✓
+- After user correction → agent re-runs with correct groupby ✓
+- No contradictory answers across turns ✓
+
+**PR:** pending → upstream `yzhou-nvwa/nvwa-mvp`
+**Requires mandatory review** (touches `src/agent/` and `src/analysis/`-adjacent tools)
+
+---
+
 ## Session Summary — 2026-04-05
 
 ### 1. Synced lisperz/Nvwa-Lite to yzhou-nvwa/nvwa-mvp ✅
