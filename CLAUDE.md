@@ -77,6 +77,7 @@ Gatekeeper
 ---
 
 ## Repo Conventions
+- **Timezone:** Pacific time for all docs, meeting notes, and daily summary filenames; UTC for code, logs, and DB timestamps.
 - `tests/integration/` — integration test cases (tests.yaml)
 - `tests/unit/` — unit tests (test_router.py, future: test_gatekeeper.py)
 - `local/` — gitignored, machine-local only (reports, strategy docs, product docs)
