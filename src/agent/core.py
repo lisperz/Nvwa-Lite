@@ -15,6 +15,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 from langchain_openai import ChatOpenAI
 
 from src.agent.prompts import build_system_prompt
+from src.agent.router import classify_intent
 from src.agent.tools import bind_dataset, bind_dataset_state, get_all_tools
 from src.agent.viz_state import VisualizationState, bind_viz_state
 from src.db.logger import DatabaseLogger
@@ -130,6 +131,28 @@ class AgentRunner:
                     messages.append(AIMessage(content=content))
 
         messages.append(HumanMessage(content=user_input))
+
+        # Classify intent — logging only, no behavior change (router v0)
+        router_result = classify_intent(user_input)
+        logger.info(
+            "Router: layer=%s task_type=%s confidence=%s matched_on=%r",
+            router_result.layer,
+            router_result.task_type,
+            router_result.confidence,
+            router_result.matched_on,
+        )
+        if self._event_logger and self._user_id and self._session_id:
+            self._event_logger.log_session_event(
+                user_id=self._user_id,
+                session_id=self._session_id,
+                event_type="router_classification",
+                metadata={
+                    "layer": router_result.layer,
+                    "task_type": router_result.task_type,
+                    "confidence": router_result.confidence,
+                    "matched_on": router_result.matched_on,
+                },
+            )
 
         tool_called = False
         max_iterations = 5
