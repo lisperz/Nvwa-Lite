@@ -58,14 +58,10 @@ tests:
       - "preprocess"
     requires_plot: true
     expected_artifact_count: 1
-<<<<<<< Updated upstream
-    notes: "Assumes CD3D is present in var_names."
-=======
     notes: >
       User explicitly requested a violin plot — only 1 artifact expected.
       A feature plot alongside it is an error (unsolicited output).
       Per C1 rule: generate only the specified plot type when user names one.
->>>>>>> Stashed changes
 
   - case_id: HP-04
     category: happy_path
@@ -290,11 +286,7 @@ tests:
     must_contain:
       - "CD3D"
     requires_plot: true
-<<<<<<< Updated upstream
-    expected_artifact_count: 1
-=======
     expected_artifact_count: 2
->>>>>>> Stashed changes
     notes: >
       Generic gene expression request with no plot type specified — both a
       feature plot (spatial) and violin plot (by cell type) are expected.
