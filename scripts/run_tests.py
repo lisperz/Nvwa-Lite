@@ -67,7 +67,7 @@ def _check_deps() -> None:
 
 
 DEFAULT_CONFIG = REPO_ROOT / "tests" / "integration" / "tests.yaml"
-DEFAULT_REPORT_DIR = REPO_ROOT / "reports"
+DEFAULT_REPORT_DIR = REPO_ROOT / "local" / "reports" / "regression"
 DEFAULT_MODEL = "gpt-4o-mini"
 
 # PNG file signature — first 4 bytes of any valid PNG
@@ -196,6 +196,15 @@ def check(
             n = len(table_results)
             detail = f"{n} produced but all failed validation (empty/no rows)" if n else "none produced"
             failures.append(f"requires_table: no valid TableResult ({detail})")
+
+    if "expected_artifact_count" in tc:
+        expected = tc["expected_artifact_count"]
+        actual = len(plot_results) + len(table_results)
+        if actual != expected:
+            failures.append(
+                f"expected_artifact_count: expected {expected}, got {actual} "
+                f"({len(plot_results)} plot(s), {len(table_results)} table(s))"
+            )
 
     return failures
 
