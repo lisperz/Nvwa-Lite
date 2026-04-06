@@ -102,22 +102,32 @@ def calculate_average_expression(gene: str, groupby: str = "") -> str:
 
 @tool
 def find_highest_expression(gene: str, groupby: str = "") -> str:
-    """Find which cluster has the highest expression of a specific gene.
+    """Find which group has the highest expression of a specific gene.
 
-    Use this to identify cell types based on marker gene expression.
+    CRITICAL: The groupby parameter determines the DIMENSION of your answer:
+    - groupby="cell_type" -> answers "which cell type"
+    - groupby="orig.ident" -> answers "which condition/sample"
+    - groupby="leiden" -> answers "which cluster"
+
+    IMPORTANT: Match the groupby to the user's question dimension!
+    - User asks "which cell type" -> use cell_type column
+    - User asks "which condition" -> use condition column
+    - User asks "which cluster" -> use cluster column
 
     Args:
-        gene: Gene name to analyze (e.g. 'MS4A1' for B cells).
-        groupby: Observation key for grouping. If empty, auto-detects clustering key.
+        gene: Gene name to analyze (e.g. 'MKI67', 'MS4A1').
+        groupby: Observation key for grouping. MUST match the dimension user asked about.
+                 If empty, auto-detects clustering key (WARNING: may not match user intent).
 
     Returns:
-        The cluster ID with highest expression and its mean value.
+        The group with highest expression, mean value, and top 3 groups for context.
     """
     adata = _get_adata()
 
-    # Auto-detect clustering key if not provided
+    # Auto-detect clustering key if not provided (with warning)
     if not groupby:
         groupby = _get_cluster_key()
+        logger.warning(f"No groupby specified for find_highest_expression, defaulting to {groupby}. This may not match user intent!")
 
     try:
         cluster_id, mean_expr = find_top_expressing_cluster(adata, gene, groupby)
@@ -127,11 +137,28 @@ def find_highest_expression(gene: str, groupby: str = "") -> str:
         top_row = df[df["cluster"] == cluster_id].iloc[0]
         cell_count = int(top_row["cell_count"])
 
-        result = f"Cluster {cluster_id} has the highest expression of {gene}.\n"
+        # Determine dimension type for answer formatting
+        groupby_lower = groupby.lower()
+        if "cell_type" in groupby_lower or "celltype" in groupby_lower or "annotation" in groupby_lower or "label" in groupby_lower:
+            dimension_name = "cell type"
+        elif "condition" in groupby_lower or "sample" in groupby_lower or "orig.ident" in groupby_lower or "batch" in groupby_lower or "treatment" in groupby_lower:
+            dimension_name = "condition/sample"
+        elif "cluster" in groupby_lower or "leiden" in groupby_lower or "louvain" in groupby_lower or "seurat" in groupby_lower:
+            dimension_name = "cluster"
+        else:
+            dimension_name = "group"
+
+        result = f"Highest {gene} expression by {dimension_name} (grouping column: {groupby}):\n\n"
+        result += f"**ANSWER: {cluster_id}** has the highest expression.\n"
         result += f"Mean expression: {mean_expr:.2f}\n"
-        result += f"Cells in cluster: {cell_count:,}\n\n"
-        result += "Top 3 clusters:\n"
+        result += f"Cells in this {dimension_name}: {cell_count:,}\n\n"
+        result += f"Top 3 {dimension_name}s by {gene} expression:\n"
         result += df.head(3).to_string(index=False)
+        result += f"\n\n=== IMPORTANT FOR YOUR RESPONSE ===\n"
+        result += f"Your answer dimension is '{dimension_name}' (column: {groupby}).\n"
+        result += f"If user asked 'which {dimension_name}', answer with: '{cluster_id}'\n"
+        result += f"Do NOT answer with a different dimension (e.g., cluster number if they asked for cell type).\n"
+        result += f"If this dimension doesn't match what the user asked, re-run this tool with the correct groupby parameter."
 
         return result
     except ValueError as e:

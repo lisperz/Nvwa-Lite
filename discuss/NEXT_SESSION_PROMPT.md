@@ -1,4 +1,159 @@
-# Session Summary — 2026-04-04 (Latest Update)
+# Session Summary — 2026-04-05 (Latest Update)
+
+## Session Summary — 2026-04-05 (Part 2)
+
+### Fix: Gene Expression Dimension Confusion — Cell Type vs Condition vs Cluster ✅ LOCAL TESTED
+
+**Problem (from reviewer feedback):**
+Agent made multiple critical errors when handling MKI67 expression queries:
+1. Answered "which cell type" with a condition name (PA-IVS-1v-D5) — wrong dimension
+2. Answered "which cell type" with "Cluster 3" — wrong dimension
+3. After explicit user correction ("I asked cell type, not cluster"), answered "Cluster 11" — inconsistent, still wrong
+4. Only generated one violin plot (by cell type), missing a condition-aware visualization
+5. No multi-dimensional dotplot combining cell type × condition
+
+**Root Causes:**
+1. No intent mapping for gene expression dimension queries — agent had no guidance on mapping "cell type" / "condition" / "cluster" words to correct metadata columns
+2. `find_highest_expression()` always defaulted to cluster column, ignoring user's stated dimension
+3. No multi-dimensional visualization tool — reviewer suggested `cell_type + orig.ident` combined grouping pattern
+4. No answer consistency check — agent could answer with wrong dimension and contradict itself across turns
+
+**Solution (3 files):**
+
+- **`src/agent/prompts.py`** — Added two new protocol sections:
+  1. `GENE EXPRESSION ANALYSIS INTENT MAPPING` — explicit rules mapping "cell type" → annotation columns, "condition" → sample columns, "cluster" → cluster columns; specifies that multi-dimensional queries ("across cell types AND conditions") require generating BOTH violin plots; specifies correct `groupby` for "which [dimension]" questions
+  2. `ANSWER CONSISTENCY PROTOCOL` — rules requiring the tool call `groupby` to match the user's stated dimension; worked examples of correct vs incorrect flow; recovery protocol when user corrects the agent
+
+- **`src/agent/tools.py`** — Added `dotplot_combined(genes, row_key, col_key)`:
+  - Creates a combined grouping column (`row_key + " + " + col_key`) temporarily on `adata.obs`
+  - Generates a dotplot grouped by the combined key (e.g., "B cells + PA-IVS-1v-D5")
+  - Cleans up the temporary column after plotting
+  - Equivalent to the reviewer's suggested Seurat pattern
+  - Added to `get_all_tools()` list (28 tools total)
+
+- **`src/agent/analysis_tools.py`** — Enhanced `find_highest_expression()`:
+  - Added dimension detection: inspects `groupby` column name to classify as "cell type" / "condition/sample" / "cluster" / "group"
+  - Tool output now includes explicit dimension label and IMPORTANT block telling the agent which dimension the answer is in
+  - Logs a warning when `groupby` is auto-detected (may not match user intent)
+
+**Testing (local verified):**
+- "Show MKI67 across cell types and conditions" → generates two violin plots + optional combined dotplot ✓
+- "Which cell type expresses MKI67 highest?" → calls `find_highest_expression(groupby="cell_type")`, answers with cell type name ✓
+- After user correction → agent re-runs with correct groupby ✓
+- No contradictory answers across turns ✓
+
+**PR:** pending → upstream `yzhou-nvwa/nvwa-mvp`
+**Requires mandatory review** (touches `src/agent/` and `src/analysis/`-adjacent tools)
+
+---
+
+## Session Summary — 2026-04-05
+
+### 1. Synced lisperz/Nvwa-Lite to yzhou-nvwa/nvwa-mvp ✅
+
+**Context:** Yuxin merged PR #4 and closed PR #3. `yzhou-nvwa/nvwa-mvp` is now the canonical deployed repo. `lisperz/Nvwa-Lite` becomes the personal dev fork with PRs upstream to `nvwa-mvp`.
+
+**What was done:**
+- Renamed remote `boss` → `upstream` (standard fork convention)
+- Hard-reset local `main` to `upstream/main` (nvwa-mvp @ `8373326`)
+- Force-pushed to `origin` (lisperz/Nvwa-Lite) — repos now identical
+- Committed updated `discuss/NEXT_SESSION_PROMPT.md` on top as `e33e994`
+
+**Git remote layout (local machine):**
+```
+origin    → https://github.com/lisperz/Nvwa-Lite    (personal dev fork)
+upstream  → https://github.com/yzhou-nvwa/nvwa-mvp  (canonical deployed repo)
+```
+
+**Dev workflow going forward:**
+```bash
+# New feature
+git checkout -b feat/your-feature
+git push origin feat/your-feature
+gh pr create --repo yzhou-nvwa/nvwa-mvp --base main --head lisperz:feat/your-feature
+
+# Sync fork after upstream merges
+git fetch upstream
+git reset --hard upstream/main
+git push origin main
+```
+
+**PR rules:** `/Users/zhuchen/Downloads/PR_Rules_v1.md`
+- `src/agent/` and `src/analysis/` changes require mandatory approval (cannot self-merge)
+- All other changes (tests, docs, scripts, config) can self-merge after 24h
+- Every PR needs: What it does / Why / How to test
+
+---
+
+### 2. Fixed psycopg2-binary Prod Dep Bug (PR #5) ✅
+
+**Problem:** `pyproject.toml` in nvwa-mvp had `psycopg2-binary` moved to `[dependency-groups] dev`. Dockerfile uses `uv sync --no-dev`, so it would have been excluded from the production image, crashing all DB operations on first run.
+
+**Fix:** Moved `psycopg2-binary>=2.9.0` back to `[project.dependencies]`. `pytest` is the only remaining dev dep.
+
+**PR #5:** https://github.com/yzhou-nvwa/nvwa-mvp/pull/5 (merged, squash)
+
+---
+
+### 3. Switched EC2 to Pull from yzhou-nvwa/nvwa-mvp ✅
+
+**Problem:** EC2 was still pulling from `lisperz/Nvwa-Lite`. `nvwa-mvp` is a **private repo** — HTTPS fetch without credentials fails. EC2 had no SSH deploy key for GitHub.
+
+**What was done:**
+- Generated SSH deploy key on EC2: `~/.ssh/nvwa_deploy` (ed25519)
+- Configured `~/.ssh/config` on EC2 to use deploy key for `github.com`
+- Yuxin (repo owner) added the public key to `yzhou-nvwa/nvwa-mvp` deploy keys (read-only)
+- Switched EC2 remote: `git remote set-url origin git@github.com:yzhou-nvwa/nvwa-mvp.git`
+- `git reset --hard origin/main` → EC2 now at `952973f` (PR #5)
+- Rebuilt Docker image (`docker-compose build --no-cache nvwa-lite`)
+- Restarted services: `nvwa-lite` ✅ `redis` ✅
+
+**EC2 deploy key public key (for reference):**
+```
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMMFWHcYRxQu/2OfeJFzX9g8L85kbCKDiA0PVDdKfq1z nvwa-ec2-deploy
+```
+
+**EC2 git remote now:**
+```
+origin → git@github.com:yzhou-nvwa/nvwa-mvp.git
+```
+
+**Updated deploy flow:**
+```bash
+ssh -i ~/.../nvwa-key.pem ubuntu@3.150.203.87 "
+  cd /home/ubuntu/Nvwa-Lite
+  git pull origin main
+  docker-compose build --no-cache nvwa-lite
+  docker-compose up -d
+"
+```
+
+---
+
+### 4. Fixed Admin Dashboard 502 ✅
+
+**Problem:** `nvwa.bio/admin/` returned 502 Bad Gateway after the redeploy.
+
+**Root cause:** When restarting services we ran `docker-compose up -d redis nvwa-lite` explicitly — the `dashboard` container was never started. The image existed (`nvwa-lite_dashboard:latest`) so no rebuild was needed.
+
+**Fix:** `docker-compose up -d dashboard` — no code changes, no PR needed.
+
+**Note on naming confusion:** EC2 directory is `/home/ubuntu/Nvwa-Lite` (historical name) so Docker Compose prefixes all containers with `nvwa-lite_`. The code IS from `yzhou-nvwa/nvwa-mvp` — just the folder name is old. Decision: leave as-is.
+
+---
+
+### 5. What Changed in nvwa-mvp vs Previous EC2 State (for reference)
+
+**Live behavioral changes (now on EC2):**
+- `src/agent/prompts.py` — gene-not-found → STOP + ask user (was: auto-suggest)
+- `src/agent/analysis_tools.py` + `src/types.py` — cluster key detection now includes `seurat_clusters`, `cluster`, `clusters`
+- `src/analysis/differential.py` — clear `ValueError` if `logfoldchanges` absent in DE results
+
+**New files (non-behavioral):**
+- `src/agent/router.py` — rule-based intent classifier, **not wired to core.py** (dead code)
+- `tests/integration/tests.yaml`, `tests/unit/test_router.py`, `scripts/run_tests.py` — regression test harness
+
+---
 
 ## Session Summary — 2026-04-04
 
