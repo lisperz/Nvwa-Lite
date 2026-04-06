@@ -2,7 +2,7 @@
 
 ## Session Summary — 2026-04-05 (Part 2)
 
-### Fix: Gene Expression Dimension Confusion — Cell Type vs Condition vs Cluster ✅ LOCAL TESTED
+### Fix: Gene Expression Dimension Confusion — Cell Type vs Condition vs Cluster ✅ DEPLOYED
 
 **Problem (from reviewer feedback):**
 Agent made multiple critical errors when handling MKI67 expression queries:
@@ -42,8 +42,11 @@ Agent made multiple critical errors when handling MKI67 expression queries:
 - After user correction → agent re-runs with correct groupby ✓
 - No contradictory answers across turns ✓
 
-**PR:** pending → upstream `yzhou-nvwa/nvwa-mvp`
-**Requires mandatory review** (touches `src/agent/` and `src/analysis/`-adjacent tools)
+**PR:** https://github.com/yzhou-nvwa/nvwa-mvp/pull/6 — merged (squash) at `2430a51`
+**Deployment:** ✅ Deployed to EC2 2026-04-05 — `.pyc` cache cleared, `nvwa-lite` container restarted, healthy
+
+**Repo sync:**
+- `lisperz/Nvwa-Lite main` hard-reset to `upstream/main` at `2430a51` — fork and production repo now identical
 
 ---
 
