@@ -14,6 +14,7 @@ import pandas as pd
 from langchain_core.tools import tool
 
 from src.agent import analysis_tools
+from src.agent import subset_tools
 from src.agent.viz_state import update_viz_state
 from src.analysis.calculations import calculate_mito_percentage, get_metadata_summary
 from src.analysis.composition import cross_tabulate_metadata
@@ -44,8 +45,9 @@ def bind_dataset(adata: AnnData) -> None:
     """Bind a dataset so tools can access it."""
     global _adata  # noqa: PLW0603
     _adata = adata
-    # Also bind to analysis_tools module
+    # Also bind to analysis_tools and subset_tools modules
     analysis_tools._adata = adata
+    subset_tools._adata = adata
 
 
 def bind_dataset_state(state: DatasetState) -> None:
@@ -64,6 +66,7 @@ def set_plot_generated_callback(cb: Callable[[], None]) -> None:
     """Register a callback invoked when any plot is generated."""
     global _plot_generated_callback  # noqa: PLW0603
     _plot_generated_callback = cb
+    subset_tools._plot_generated_callback = cb
 
 
 def _get_adata() -> AnnData:
@@ -116,9 +119,10 @@ def _store_table_and_return(result: TableResult) -> str:
 
 def get_plot_results() -> list[PlotResult]:
     """Retrieve all plot results from this turn (called by UI)."""
-    # Combine results from both modules
+    # Combine results from all modules
     all_results = list(_plot_results)
     all_results.extend(analysis_tools._plot_results)
+    all_results.extend(subset_tools._plot_results)
     return all_results
 
 
@@ -131,6 +135,7 @@ def clear_plot_results() -> None:
     """Clear the plot result buffer."""
     _plot_results.clear()
     analysis_tools._plot_results.clear()
+    subset_tools._plot_results.clear()
 
 
 def clear_table_results() -> None:
@@ -231,21 +236,19 @@ def dotplot(genes: str, groupby: str = "") -> str:
 def dotplot_combined(genes: str, row_key: str, col_key: str) -> str:
     """Generate a dot plot showing gene expression across TWO dimensions simultaneously.
 
-    This creates a combined grouping (row_key × col_key) to show how expression
-    varies across both dimensions at once. Equivalent to Seurat's pattern:
-    obj.obs["combined"] = obj.obs["row_key"] + " + " + obj.obs["col_key"]
+    Creates a combined grouping (row_key + col_key) and plots as a single vertical list.
+    The result is a long list of combined labels (e.g., "Cardiomyocyte + Control-D10").
 
-    Use this for queries like:
-    - "Show MKI67 across cell types and conditions"
-    - "How does gene X vary by cell type in each sample?"
+    For cross-cell-type comparisons, prefer dotplot_matrix which creates a cleaner
+    hierarchical matrix layout. Use this as a fallback when dotplot_matrix is insufficient.
 
     Args:
-        genes: Comma-separated gene names (e.g. 'MKI67,CD3E').
-        row_key: First dimension metadata column (e.g., 'cell_type').
-        col_key: Second dimension metadata column (e.g., 'orig.ident').
+        genes: Comma-separated gene names (e.g., "TNNT2,NKX2-5")
+        row_key: First grouping variable (e.g., "cell_type")
+        col_key: Second grouping variable (e.g., "orig.ident")
 
     Returns:
-        Dot plot with combined grouping showing both dimensions.
+        Success message with plot details, or error message.
     """
     adata = _get_adata()
 
@@ -294,16 +297,108 @@ def dotplot_combined(genes: str, row_key: str, col_key: str) -> str:
 
 
 @tool
-def feature_plot(gene: str) -> str:
+def dotplot_matrix(genes: str, cell_type_key: str, condition_key: str) -> str:
+    """Generate a matrix-style dot plot for cell_type × condition comparison.
+
+    This creates a hierarchical dot plot where:
+    - X-axis shows cell types grouped by condition (hierarchical layout)
+    - Y-axis shows genes
+    - Dot size = fraction of cells expressing the gene
+    - Dot color = mean expression level
+
+    Use this for questions like:
+    - "How does [gene] vary across cell types in disease vs normal?"
+    - "Compare [gene] expression across cell types and conditions"
+    - "Show [gene] in different cell types split by condition"
+
+    Args:
+        genes: Comma-separated gene names (e.g., "NKX2-5" or "NKX2-5,TNNT2")
+        cell_type_key: Column name for cell type grouping (e.g., "cell_type")
+        condition_key: Column name for condition grouping (e.g., "orig.ident")
+
+    Returns:
+        Success message with plot details, or error message.
+
+    Example:
+        dotplot_matrix(genes="NKX2-5", cell_type_key="cell_type", condition_key="orig.ident")
+    """
+    import io as _io
+    import matplotlib.pyplot as plt
+
+    adata = _get_adata()
+    gene_list = [g.strip() for g in genes.split(",")]
+
+    # Validate keys
+    if cell_type_key not in adata.obs.columns:
+        return f"Error: '{cell_type_key}' not found in adata.obs"
+    if condition_key not in adata.obs.columns:
+        return f"Error: '{condition_key}' not found in adata.obs"
+
+    # Validate genes (check var_names and raw)
+    available_genes = set(adata.var_names)
+    if adata.raw is not None:
+        available_genes.update(adata.raw.var_names)
+    missing = [g for g in gene_list if g not in available_genes]
+    if missing:
+        return f"Error: Genes not found: {missing}"
+
+    try:
+        import scanpy as sc
+
+        fig = sc.pl.dotplot(
+            adata,
+            var_names=gene_list,
+            groupby=[cell_type_key, condition_key],
+            return_fig=True,
+        )
+        fig.savefig(buf := _io.BytesIO(), format="png", bbox_inches="tight")
+        plt.close("all")
+        buf.seek(0)
+        image_bytes = buf.read()
+
+        n_cell_types = adata.obs[cell_type_key].nunique()
+        n_conditions = adata.obs[condition_key].nunique()
+
+        code = (
+            f'sc.pl.dotplot(adata, var_names={gene_list},\n'
+            f'    groupby=["{cell_type_key}", "{condition_key}"])'
+        )
+        message = (
+            f"Matrix dot plot of {', '.join(gene_list)}: "
+            f"{n_cell_types} cell types × {n_conditions} conditions. "
+            f"X-axis: cell types grouped by condition (hierarchical). "
+            f"Y-axis: genes. Dot size = fraction expressing, dot color = mean expression."
+        )
+
+        result = PlotResult(image=image_bytes, code=code, message=message)
+        result_str = _store_and_return(result)
+        update_viz_state("dotplot_matrix", cell_type_key=cell_type_key,
+                         condition_key=condition_key, genes=gene_list)
+        return result_str
+
+    except ValueError as e:
+        return f"Error: {e}"
+    except Exception as e:
+        logger.exception("Matrix dot plot failed")
+        return f"Unexpected error: {e}"
+
+
+@tool
+def feature_plot(gene: str, split_by: str = "") -> str:
     """Generate a feature plot showing gene expression on UMAP (viridis colormap).
 
     Args:
         gene: The gene name to visualize.
+        split_by: Optional observation key to split the plot into separate panels
+                  (e.g. 'orig.ident' to show one panel per condition/sample).
+                  Each panel uses the same color scale for direct comparison.
     """
     adata = _get_adata()
     try:
-        result = _store_and_return(plot_feature(adata, gene=gene))
-        update_viz_state("feature", genes=[gene])
+        result = _store_and_return(plot_feature(
+            adata, gene=gene, split_by=split_by if split_by else None,
+        ))
+        update_viz_state("feature", genes=[gene], split_by=split_by or None)
         return result
     except ValueError as e:
         return f"Error: {e}"
@@ -1318,7 +1413,7 @@ def get_all_tools() -> list:
     """Return all tools for the agent."""
     return [
         # Plotting tools
-        umap_plot, violin_plot, dotplot, dotplot_combined, feature_plot,
+        umap_plot, violin_plot, dotplot, dotplot_combined, dotplot_matrix, feature_plot,
         heatmap_plot, scatter_plot, volcano_plot_tool,
         # Core tools
         dataset_info, check_data_status, inspect_metadata, composition_analysis,
@@ -1331,4 +1426,6 @@ def get_all_tools() -> list:
         get_de_results_table, get_pairwise_de_table,
         # Analysis/reasoning tools
         *analysis_tools.get_analysis_tools(),
+        # Subset analysis tools
+        *subset_tools.get_subset_tools(),
     ]

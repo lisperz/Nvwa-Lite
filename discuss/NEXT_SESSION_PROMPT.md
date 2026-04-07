@@ -1,8 +1,87 @@
-# Session Summary — 2026-04-05 (Latest Update)
+# Session Summary — 2026-04-07 (Latest Update)
+
+## Session Summary — 2026-04-07
+
+### Condition-Split Feature Plot + Cell-Type Subset Analysis + Matrix Dot Plot — ✅ COMPLETE (LOCAL, TESTED)
+
+**Context:** Reviewer feedback on two failure cases:
+1. "Plot TNNT2 expression split by condition. Is there a difference between PA-IVS and normal cardiomyocytes?" — agent generated unsplit global UMAP, no cardiomyocyte-specific comparison
+2. "How does NKX2-5 expression vary across different cell types in disease vs normal?" — agent defaulted to cardiomyocyte-only violin instead of cross-cell-type comparison
+
+**Status:** ✅ All fixes implemented and tested locally. Needs PR to upstream.
+
+### What Was Completed
+
+#### 1. Split-by-Condition Feature Plot ✅
+- `plot_feature()` in `src/plotting/executor.py` supports `split_by` parameter
+- Creates one UMAP panel per condition with **shared vmin/vmax** color scale
+- Uses `matplotlib.gridspec.GridSpec` with a dedicated colorbar column — no overlap
+- `feature_plot` tool in `tools.py` exposes `split_by` to the agent
+
+#### 2. Cell-Type Subset Tools ✅
+- NEW file: `src/agent/subset_tools.py` (2 tools)
+  - **`subset_violin_plot(genes, subset_key, subset_value, groupby)`** — filters adata to a cell type, violin grouped by condition, per-group quantitative summary (n, mean, median)
+  - **`subset_feature_plot(gene, subset_key, subset_value, split_by)`** — filters adata to a cell type, feature plot on UMAP
+- **Multi-value matching:** `_resolve_subset_values()` returns ALL matching subtypes for broad terms
+- **Condition coverage reporting:** `_report_condition_coverage()` tells agent which conditions have zero cells
+- **Quantitative summary:** `_compute_group_summary()` returns per-group mean/median for comparison questions
+- Wired into `tools.py`: `bind_dataset()`, `set_plot_generated_callback()`, `get_plot_results()`, `clear_plot_results()` all propagate to `subset_tools`
+
+#### 3. `dotplot_matrix` Tool ✅ (Fixed 2026-04-07)
+- Rewrote broken implementation — previous version had wrong references (`get_adata`, `plot_dotplot_matrix`, `register_plot`)
+- Now uses `_get_adata()`, scanpy's native multi-key groupby, and `_store_and_return()`
+- Implementation: `sc.pl.dotplot(adata, var_names=gene_list, groupby=[cell_type_key, condition_key], return_fig=True)`
+- Produces hierarchical matrix layout: cell types grouped by condition on x-axis, genes on y-axis
+- Added to `get_all_tools()` — was missing, agent couldn't call it
+- Gene validation checks both `adata.var_names` and `adata.raw.var_names`
+
+#### 4. `dotplot_combined` Syntax Error Fixed ✅ (Fixed 2026-04-07)
+- Previous edit left a mangled docstring: `""" to show how expression varies across...` — stray text after closing `"""`
+- Caused `SyntaxError: unterminated string literal` crashing the entire app on startup
+- Cleaned up to a single correct docstring; removed the "DEPRECATED" note
+
+#### 5. System Prompt Updates ✅
+- **COMPOUND GENE EXPRESSION QUERIES** section in `prompts.py`:
+  - **Type A vs Type B distinction**: "in [cell type]" → subset-focused (`subset_violin_plot`) vs "across [cell types]" → cross-cell-type (`dotplot_matrix`)
+  - Constraint propagation rules: never drop split/subset/comparison constraints
+  - Broad cell type matching guidance: use stem form ("cardiomyocyte" not "Cardiomyocytes")
+  - Condition coverage: agent must relay missing conditions to user
+  - **Answering comparison questions**: 5-point protocol requiring direct biological conclusion with numbers
+- **"Choosing Between Violin Plot and Dot Plot"** section cleaned up — removed duplicate bullets (previously had 4 bullets with violin and dotplot each appearing twice)
+- **Example 2 added**: NKX2-5 cross-cell-type workflow — correct tool is `dotplot_matrix`, explicit "do NOT use `subset_violin_plot`" instruction
+- **New constraint bullet**: `"across different cell types" → use dotplot_matrix, NOT subset_violin_plot`
+
+#### 6. Tool Count
+30 tools total (added `subset_violin_plot`, `subset_feature_plot`, `dotplot_matrix`; `feature_plot` now supports `split_by`)
+
+### Files Modified
+
+| File | Status | What Changed |
+|---|---|---|
+| `src/plotting/executor.py` | ✅ | `plot_feature()` supports `split_by` with GridSpec + dedicated colorbar column |
+| `src/agent/tools.py` | ✅ | `dotplot_matrix` rewritten (fixed broken refs); added to `get_all_tools()`; `dotplot_combined` docstring fixed (syntax error); `feature_plot` has `split_by`; `subset_tools` wired in |
+| `src/agent/subset_tools.py` | ✅ NEW | `subset_violin_plot`, `subset_feature_plot`, multi-value matching, condition coverage, quantitative summary |
+| `src/agent/prompts.py` | ✅ | COMPOUND QUERY section; Type A/B distinction; Example 2 (NKX2-5); duplicate bullets removed |
+
+### Next Session Priorities
+
+1. **Create PR to upstream** — All local changes tested and working. Create PR to `yzhou-nvwa/nvwa-mvp`
+2. **Deploy to EC2** — After PR merges, pull and restart container
+
+### Key Design Decisions Made
+
+1. **Multi-value subset matching** — "cardiomyocyte" matches ALL subtypes, not just the first one found
+2. **Quantitative summary in tool output** — without per-group mean/median, agent can't answer "is there a difference?" questions
+3. **GridSpec with dedicated colorbar column** — reliable approach for non-overlapping colorbars in split feature plots
+4. **Displayed code matches actual operation** — shows `adata_sub` not `adata` when subsetting
+5. **Type A vs Type B question distinction** — "in cardiomyocytes" (subset) vs "across cell types" (cross-comparison) require completely different tools
+6. **scanpy multi-key groupby** — `sc.pl.dotplot(adata, groupby=["cell_type", "condition"])` natively produces hierarchical matrix layout; no custom implementation needed
+
+---
 
 ## Session Summary — 2026-04-05 (Part 2)
 
-### Fix: Gene Expression Dimension Confusion — Cell Type vs Condition vs Cluster ✅ LOCAL TESTED
+### Fix: Gene Expression Dimension Confusion — Cell Type vs Condition vs Cluster ✅ DEPLOYED
 
 **Problem (from reviewer feedback):**
 Agent made multiple critical errors when handling MKI67 expression queries:
@@ -42,8 +121,11 @@ Agent made multiple critical errors when handling MKI67 expression queries:
 - After user correction → agent re-runs with correct groupby ✓
 - No contradictory answers across turns ✓
 
-**PR:** pending → upstream `yzhou-nvwa/nvwa-mvp`
-**Requires mandatory review** (touches `src/agent/` and `src/analysis/`-adjacent tools)
+**PR:** https://github.com/yzhou-nvwa/nvwa-mvp/pull/6 — merged (squash) at `2430a51`
+**Deployment:** ✅ Deployed to EC2 2026-04-05 — `.pyc` cache cleared, `nvwa-lite` container restarted, healthy
+
+**Repo sync:**
+- `lisperz/Nvwa-Lite main` hard-reset to `upstream/main` at `2430a51` — fork and production repo now identical
 
 ---
 
@@ -823,10 +905,12 @@ CREATE TABLE message_artifacts (
 ✓ "Are my samples balanced?" distinguishes total cell count balance vs cell-type composition balance
 
 ### Known Issues
-- None currently blocking
+- `dotplot_matrix` tool in `tools.py` has broken references — must be fixed or removed before PR
+- `prompts.py` COMPOUND QUERY section has some redundant bullets from multiple edits — needs cleanup
+- All 2026-04-06 changes are LOCAL ONLY — not committed, not deployed
 
 ### Tool Count
-27 tools total (added `composition_analysis`; removed `cell_composition` and `composition_plot`)
+29 tools total (added `subset_violin_plot`, `subset_feature_plot`; `feature_plot` now supports `split_by`; `dotplot_matrix` added but broken)
 
 ### RDS Schema (6 tables)
 - `users` — pilot user tokens (SHA-256 hashed)

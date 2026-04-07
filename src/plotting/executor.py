@@ -262,13 +262,21 @@ def plot_violin(
     return PlotResult(image=image, code=code, message=message)
 
 
-def plot_feature(adata: AnnData, gene: str) -> PlotResult:
+def plot_feature(
+    adata: AnnData,
+    gene: str,
+    split_by: str | None = None,
+) -> PlotResult:
     """Generate a feature plot (UMAP colored by gene expression with viridis).
 
     Args:
         adata: The annotated data matrix (must have UMAP coordinates).
         gene: Gene name to visualize.
+        split_by: Optional observation key to split the plot into separate panels
+                  (e.g. 'orig.ident' to show one panel per condition/sample).
     """
+    import numpy as np
+
     gene_err = validate_gene(adata, gene)
     if gene_err:
         raise ValueError(gene_err)
@@ -276,11 +284,74 @@ def plot_feature(adata: AnnData, gene: str) -> PlotResult:
     if "X_umap" not in adata.obsm:
         raise ValueError("UMAP not computed. Run preprocessing first.")
 
-    code = f'sc.pl.umap(adata, color="{gene}", cmap="viridis")'
+    if split_by:
+        split_err = validate_obs_key(adata, split_by)
+        if split_err:
+            raise ValueError(split_err)
+
+    code = f'sc.pl.umap(adata, color="{gene}", cmap="viridis"'
+    if split_by:
+        code += f', split_by="{split_by}"'
+    code += ")"
 
     logger.info("Executing: %s", code)
-    sc.pl.umap(adata, color=gene, cmap="viridis", show=False)
+
+    if split_by:
+        groups = sorted(adata.obs[split_by].unique())
+        n_groups = len(groups)
+        n_cols = min(4, n_groups)
+        n_rows = (n_groups + n_cols - 1) // n_cols
+
+        # Compute global vmin/vmax for consistent color scale across panels
+        if gene in adata.var_names:
+            expr = adata[:, gene].X
+        elif adata.raw is not None and gene in adata.raw.var_names:
+            expr = adata.raw[:, gene].X
+        else:
+            raise ValueError(f"Gene '{gene}' not found.")
+        if hasattr(expr, "toarray"):
+            expr = expr.toarray()
+        vmin, vmax = float(np.min(expr)), float(np.max(expr))
+
+        # Use GridSpec with a dedicated colorbar column to avoid overlap
+        from matplotlib.gridspec import GridSpec
+        fig = plt.figure(figsize=(5 * n_cols + 1.5, 5 * n_rows))
+        gs = GridSpec(n_rows, n_cols + 1, figure=fig,
+                      width_ratios=[1] * n_cols + [0.05],
+                      wspace=0.3, hspace=0.3)
+
+        axes = []
+        for r in range(n_rows):
+            for c in range(n_cols):
+                axes.append(fig.add_subplot(gs[r, c]))
+
+        for idx, group in enumerate(groups):
+            ax = axes[idx]
+            mask = adata.obs[split_by] == group
+            subset = adata[mask, :]
+            sc.pl.umap(
+                subset, color=gene, cmap="viridis",
+                vmin=vmin, vmax=vmax,
+                ax=ax, title=f"{split_by}: {group}",
+                show=False, colorbar_loc=None,
+            )
+
+        # Hide unused subplots
+        for idx in range(n_groups, len(axes)):
+            axes[idx].axis("off")
+
+        # Place shared colorbar in the dedicated column
+        cbar_ax = fig.add_subplot(gs[:, -1])
+        sm = plt.cm.ScalarMappable(cmap="viridis", norm=plt.Normalize(vmin=vmin, vmax=vmax))
+        sm.set_array([])
+        fig.colorbar(sm, cax=cbar_ax, label=gene)
+    else:
+        sc.pl.umap(adata, color=gene, cmap="viridis", show=False)
+
     image = _figure_to_bytes()
 
-    message = f"Feature plot of {gene} expression on UMAP."
+    if split_by:
+        message = f"Feature plot of {gene} expression on UMAP, split by {split_by} into {len(groups)} panels (shared color scale)."
+    else:
+        message = f"Feature plot of {gene} expression on UMAP."
     return PlotResult(image=image, code=code, message=message)
