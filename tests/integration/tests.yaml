@@ -40,6 +40,7 @@ tests:
     must_contain:
       - "umap"
     requires_plot: true
+    expected_artifact_count: 1
     requires_precomputed_umap: true
     notes: >
       Requires the dataset to have X_umap in obsm and a leiden/louvain column in obs.
@@ -56,18 +57,26 @@ tests:
     must_not_contain:
       - "preprocess"
     requires_plot: true
-    notes: "Assumes CD3D is present in var_names."
+    expected_artifact_count: 1
+    notes: >
+      User explicitly requested a violin plot — only 1 artifact expected.
+      A feature plot alongside it is an error (unsolicited output).
+      Per C1 rule: generate only the specified plot type when user names one.
 
   - case_id: HP-04
     category: happy_path
-    prompt: "Create a dotplot for CD3D, MS4A1, and NKG7 grouped by leiden."
+    prompt: "Create a dotplot of the top 3 marker genes for each cluster."
     expected_status: PASS
     must_contain:
       - "dot plot"  # agent writes "dot plot" (two words), not "dotplot"
     must_not_contain:
       - "preprocess"
     requires_plot: true
-    notes: "Assumes CD3D, MS4A1, NKG7 are present in var_names."
+    expected_artifact_count: 1
+    notes: >
+      Dataset-generic prompt — no hardcoded gene names. Agent discovers
+      marker genes from the dataset and plots them. Works on any preprocessed
+      dataset with clustering results.
 
   - case_id: HP-05
     category: happy_path
@@ -86,9 +95,13 @@ tests:
     prompt: "Summarize the QC metrics for this dataset."
     expected_status: PASS
     must_contain:
-      - "mean"    # always present in QC summary regardless of column naming convention
-      - "median"  # (scanpy: n_genes / seurat: nFeature_RNA — column names vary by dataset)
+      - "qc"      # agent always references QC in its response
     requires_table: true
+    expected_artifact_count: 1
+    notes: >
+      QC stats are returned as a TableResult artifact (CSV + display).
+      must_contain checks agent response text only — mean/median live in
+      the table, not the text response.
 
   # ── Input / data errors (6) ──────────────────────────────────────────────────
   # The agent should produce a clear error message, not silently succeed.
@@ -185,6 +198,7 @@ tests:
     must_contain:
       - "dot plot"  # agent writes "dot plot" (two words)
     requires_plot: true
+    expected_artifact_count: 1
     notes: >
       Exercises a 10-gene panel. Primarily a smoke-test for large gene lists;
       a partial match (some genes not found) is still acceptable for WARN.
@@ -219,6 +233,7 @@ tests:
     must_contain:
       - "heatmap"
     requires_plot: true
+    expected_artifact_count: 1
     notes: >
       Tests the heatmap tool, which has no other coverage in the suite.
       If rank_genes_groups is pre-computed the agent plots directly; otherwise
@@ -271,9 +286,12 @@ tests:
     must_contain:
       - "CD3D"
     requires_plot: true
+    expected_artifact_count: 2
     notes: >
-      Paraphrase of a violin-plot request. The agent must recognize this as a
-      supported operation and produce a plot, not refuse it as out-of-scope.
+      Generic gene expression request with no plot type specified — both a
+      feature plot (spatial) and violin plot (by cell type) are expected.
+      Per C1 rule: when user does not specify a plot type, generate both.
+      This was previously flagged as a bug; it is now confirmed correct behavior.
 
   - case_id: OOS-04
     category: out_of_scope
@@ -284,6 +302,7 @@ tests:
     must_contain:
       - "umap"
     requires_plot: true
+    expected_artifact_count: 1
     requires_precomputed_umap: true
     notes: >
       Paraphrase of a UMAP-by-cluster request. The agent should map this to

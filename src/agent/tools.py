@@ -1000,21 +1000,16 @@ def summarize_qc_metrics_tool() -> str:
     try:
         df = summarize_qc_metrics(adata)
 
-        # Format as a readable table
-        result = f"QC Metrics Summary ({adata.n_obs:,} cells):\n\n"
+        csv_buffer = io.StringIO()
+        df.to_csv(csv_buffer, index=False)
 
-        for _, row in df.iterrows():
-            metric = row["metric"]
-            result += f"Metric: {metric}\n"
-            result += f"  Cells:  {row['n_cells']:,}\n"
-            result += f"  Mean:   {row['mean']:.2f}\n"
-            result += f"  Median: {row['median']:.2f}\n"
-            result += f"  Std:    {row['std']:.2f}\n"
-            result += f"  Range:  {row['min']:.2f} - {row['max']:.2f}\n"
-            result += f"  IQR:    {row['q25']:.2f} - {row['q75']:.2f}\n"
-            result += "\n"
-
-        return result.strip()
+        table = TableResult(
+            csv_data=csv_buffer.getvalue(),
+            code="summarize_qc_metrics_tool()",
+            message=f"QC metrics summary for {adata.n_obs:,} cells ({len(df)} metrics detected).",
+            display_df=df.to_markdown(index=False),
+        )
+        return _store_table_and_return(table)
 
     except ValueError as e:
         return f"Error: {e}"
