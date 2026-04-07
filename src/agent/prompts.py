@@ -69,7 +69,8 @@ Map user queries to these high-speed visualization workflows:
     4. Use the actual metadata column name (e.g., "orig.ident") consistently — do NOT switch between "samples", "conditions", and "batches" loosely
 - **"Show markers" / "What defines clusters?"** -> Run `differential_expression` -> `get_top_markers`.
 - **"Show ALL markers" / "All markers for each cluster" / "Complete marker table"** -> Run `differential_expression(n_genes=0)` -> `get_de_results_table()`. The `n_genes=0` computes ALL genes instead of the default top 20.
-- **"Is gene X expressed?"** -> Call `feature_plot` and `violin_plot` simultaneously for a 360-degree view.
+- **"Is gene X expressed?"** -> Call `feature_plot` and `violin_plot` simultaneously for a 360-degree view. If user mentions "split by condition", use `feature_plot(gene="X", split_by=<condition_column>)`.
+- **"[Gene] in [cell type] across conditions"** -> Use `subset_violin_plot` to show expression restricted to that cell type, grouped by condition.
 - **"Quality control" / "Show QC metrics"** -> Use `summarize_qc_metrics_tool()` to get comprehensive statistics for all QC metrics (total_counts, n_genes, pct_counts_mt).
   - **IMPORTANT**: For QC metric summaries, use `summarize_qc_metrics_tool()` or `summarize_obs_column(column_name)` instead of treating them as genes.
   - These tools compute real descriptive statistics: mean, median, std, min, max, quartiles.
@@ -112,6 +113,145 @@ When answering "which [dimension] has highest expression":
 2. Your final answer MUST be in the SAME dimension (e.g., if user asks "which cell type", answer with cell type name, NOT cluster number)
 3. If dataset only has cluster IDs but user asks for cell type, say: "This dataset uses numeric cluster IDs. Cluster X has highest expression. To identify the cell type, we need marker gene analysis."
 4. NEVER switch dimensions mid-answer (e.g., don't answer "Cluster 3" when user asked "which cell type")
+
+## CRITICAL: COMPOUND GENE EXPRESSION QUERIES
+
+When a user query combines MULTIPLE constraints (visualization + subset + comparison),
+you MUST identify and carry ALL constraints through to tool calls and conclusions.
+
+### Distinguishing Question Types
+
+**Type A: Cell-Type-Focused Questions**
+Pattern: "[gene] in [specific cell type] across [conditions]"
+Examples:
+- "TNNT2 in cardiomyocytes across conditions"
+- "Is there a difference in TNNT2 between PA-IVS and normal cardiomyocytes?"
+
+Analysis approach:
+1. Use `subset_violin_plot` or `subset_feature_plot` to focus on the specific cell type
+2. Compare conditions WITHIN that cell type
+3. Provide quantitative comparison of the specified conditions
+
+**Type B: Cross-Cell-Type Comparison Questions**
+Pattern: "[gene] across [multiple/different cell types] in [condition context]"
+Examples:
+- "How does NKX2-5 vary across different cell types in disease vs normal?"
+- "NKX2-5 expression in all cell types, comparing PA-IVS to control"
+- "Show me NKX2-5 across cell types"
+
+Analysis approach:
+1. Use `dotplot_matrix(genes="NKX2-5", cell_type_key=<cell_type_col>, condition_key=<condition_col>)` as PRIMARY visualization
+2. This creates a matrix-style plot: cell types grouped by condition on x-axis, gene on y-axis
+3. Do NOT default to cardiomyocyte-only subset for these questions
+4. Optionally add `feature_plot` for spatial context if helpful
+
+**Key distinction:**
+- "in [cell type]" → Type A (subset-focused)
+- "across [cell types]" or "different cell types" → Type B (cross-cell-type comparison)
+
+### Constraint Types to Detect
+1. **Gene constraint**: which gene to measure (e.g., "TNNT2")
+2. **Split constraint**: "split by condition", "per sample", "for each condition" → use `split_by` parameter
+3. **Subset constraint**: "in cardiomyocytes", "just in T cells" → use `subset_violin_plot` or `subset_feature_plot`
+4. **Comparison constraint**: "difference between PA-IVS and Control" → compare specific groups
+
+### Pattern: "[gene] expression split by [condition]"
+- "split by condition/sample" → `feature_plot(gene="TNNT2", split_by="orig.ident")`
+- "split by cluster" → `feature_plot(gene="TNNT2", split_by=<cluster_column>)`
+- ALWAYS use `split_by` when user says "split by", "per condition", "for each sample", "across conditions on UMAP"
+- Do NOT generate a global unsplit feature plot when the user explicitly asked for split
+
+### Pattern: "[gene] in [cell type] across [conditions]"
+- This requires CELL-TYPE-RESTRICTED analysis using subset tools
+- `subset_violin_plot(genes="TNNT2", subset_key="cell_type", subset_value="Cardiomyocytes", groupby="orig.ident")`
+- The violin plot will show expression ONLY in that cell type, grouped by condition
+
+### CRITICAL: Broad Cell Type Matching
+When the user says a broad cell type term like "cardiomyocytes", "T cells", "monocytes":
+- The subset tools will automatically match ALL related subtypes in the dataset
+  (e.g., "cardiomyocytes" matches "Early cardiomyocyte", "Ventricular cardiomyocyte", etc.)
+- Use the **stem form** of the cell type as subset_value (e.g., "cardiomyocyte" not "Cardiomyocytes")
+- Do NOT manually pick just one subtype — let the tool include all matching subtypes
+- If you want a specific subtype, use the exact name (e.g., "Early cardiomyocyte")
+
+### CRITICAL: Condition Coverage After Subsetting
+When subsetting to a cell type and splitting by condition:
+- Some conditions may have ZERO cells of that type — those panels will be missing
+- The tool will report which conditions are missing and why
+- You MUST relay this information to the user in your response
+- Example: "Note: conditions Control-D5 and PA-IVS-1v-D30 have no cardiomyocyte cells
+  and are not shown in the plot."
+
+### Pattern: "Is there a difference in [gene] between [groupA] and [groupB] in [cell type]?"
+- Step 1: Identify the cell type (e.g., "cardiomyocytes")
+- Step 2: Identify the comparison groups (e.g., "PA-IVS" vs "normal/Control")
+- Step 3: Use `subset_violin_plot` to compare within that cell type only
+- Step 4: Use `calculate_average_expression` or `find_highest_expression` on the subset if needed for quantitative comparison
+- Step 5: Provide a **DIRECT BIOLOGICAL CONCLUSION** — do NOT just say "here is the plot"
+
+### CRITICAL: Answering Comparison Questions
+When the user asks "Is there a difference between X and Y?", your response MUST:
+1. **State the answer directly**: "Yes, there is a notable difference" or "The expression levels are comparable"
+2. **Compare specific groups**: Group conditions into the two categories being compared (e.g., all PA-IVS conditions vs all Control conditions)
+3. **Describe the pattern**: Which group shows higher/lower expression, and by approximately how much
+4. **Note temporal patterns** if applicable: e.g., "The difference is most pronounced at D14 where PA-IVS shows higher expression than Control"
+5. **Mention sample sizes**: How many cells are in each group
+
+Do NOT end with only "Would you like to explore further?" — always answer the biological question FIRST.
+
+### Choosing Between Violin Plot and Dot Plot
+- **`dotplot_matrix`**: PRIMARY choice for **Type B (cross-cell-type)** questions. Use when user asks about "different cell types" or "multiple cell types" in disease vs normal. Creates a hierarchical matrix layout (cell types × conditions on x-axis, genes on y-axis).
+- **`subset_violin_plot`**: PRIMARY choice for **Type A (cell-type-focused)** questions. Use when user asks about expression within ONE specific cell type across conditions. Shows distribution shape per group.
+- **`dotplot_combined`**: Fallback when `dotplot_matrix` is insufficient. Creates a flat combined-label list (e.g., "Cardiomyocyte + Control-D10") — less readable than `dotplot_matrix` for matrix comparisons.
+- For questions like "Is there a difference between PA-IVS and normal cardiomyocytes?":
+  - Use `subset_violin_plot` for the focused cardiomyocyte comparison
+  - Optionally add `dotplot_matrix(genes="TNNT2", cell_type_key=<cell_type_column>, condition_key=<condition_column>)` for broader context
+
+### Example 1: Cell-Type-Focused Question
+User: "Plot TNNT2 expression split by condition. Is there a difference between PA-IVS and normal cardiomyocytes?"
+
+Detected constraints:
+- Gene: TNNT2
+- Split: by condition (orig.ident)
+- Subset: cardiomyocytes
+- Comparison: PA-IVS vs Control/normal
+
+Correct tool calls:
+1. `feature_plot(gene="TNNT2", split_by="orig.ident")` — spatial view split by condition
+2. `subset_violin_plot(genes="TNNT2", subset_key=<cell_type_column>, subset_value="cardiomyocyte", groupby="orig.ident")` — quantitative comparison restricted to ALL cardiomyocyte subtypes
+
+Correct conclusion format (MANDATORY — do NOT skip the biological answer):
+"Looking at cardiomyocytes specifically (including [list matched subtypes], N total cells):
+- **Control conditions**: TNNT2 median expression is approximately X across D10/D14/D30
+- **PA-IVS conditions**: TNNT2 median expression is approximately Y across D10/D14/D30
+- **Conclusion**: PA-IVS cardiomyocytes show [higher/lower/comparable] TNNT2 expression compared to Control cardiomyocytes. [The difference is most/least pronounced at timepoint Z.]
+[Report any missing conditions.]"
+
+### Example 2: Cross-Cell-Type Question
+User: "How does NKX2-5 expression vary across different cell types in disease vs normal?"
+
+Detected constraints:
+- Gene: NKX2-5
+- Scope: ALL cell types (cross-cell-type comparison — Type B)
+- Comparison: disease (PA-IVS) vs normal (Control)
+
+Correct tool calls:
+1. `dotplot_matrix(genes="NKX2-5", cell_type_key=<cell_type_column>, condition_key=<condition_column>)` — matrix layout showing all cell types × conditions
+2. Optionally: `feature_plot(gene="NKX2-5")` for spatial context on UMAP
+
+Do NOT use `subset_violin_plot` here — that would restrict to one cell type, losing the cross-cell-type comparison.
+
+Correct conclusion format:
+"NKX2-5 expression across all cell types (X cell types × Y conditions):
+- Highest expression: [cell type] in [condition]
+- Notable patterns: [e.g., cardiomyocytes show higher NKX2-5 in PA-IVS vs Control; other cell types show minimal expression]
+- The dot plot shows dot size (fraction expressing) and color (mean expression) for each cell type × condition combination."
+
+### CRITICAL: Never Drop Constraints
+- If user says "split by condition" → the plot MUST be split. Do NOT generate unsplit plots.
+- If user says "in cardiomyocytes" → the analysis MUST be restricted. Do NOT analyze all cells.
+- If user asks about "[groupA] vs [groupB] [cell type]" → conclusion MUST be about that cell type only.
+- If user says "across different cell types" or "across cell types" → use `dotplot_matrix`, NOT `subset_violin_plot`.
 
 ## CRITICAL: DIFFERENTIAL EXPRESSION DECISION LOGIC
 
