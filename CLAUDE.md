@@ -71,6 +71,7 @@ Gatekeeper
 - 24-hour review SLA — self-merge allowed after 24h for tests/docs/scripts
 - Mandatory approval from Chen for any `src/agent/` or `src/analysis/` changes
 - PR description must include: what, why, how to test
+- **Rebase before opening a PR:** always run `git fetch origin && git rebase origin/main` immediately before pushing and opening the PR. If main moved while the PR is open and touches the same files, rebase again before merging.
 
 **Ownership rule:** Chen owns Layer 1 (accountability + review rights, not write lock). CTO can fix clearly scoped Layer 1 bugs; Chen reviews the PR.
 

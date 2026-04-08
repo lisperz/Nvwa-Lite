@@ -23,7 +23,13 @@ class DatabaseLogger:
     # Session bootstrap
     # ------------------------------------------------------------------
 
-    def ensure_session(self, user_id: str, session_id: str, filename: str) -> None:
+    def ensure_session(
+        self,
+        user_id: str,
+        session_id: str,
+        filename: str,
+        dataset_metadata: dict[str, Any] | None = None,
+    ) -> None:
         """Insert analysis_session row if it doesn't exist yet.
 
         Called once per agent turn before any other log method.
@@ -35,15 +41,15 @@ class DatabaseLogger:
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    INSERT INTO analysis_sessions (session_id, user_id, filename, status)
-                    VALUES (%s, %s, %s, 'active')
+                    INSERT INTO analysis_sessions (session_id, user_id, filename, status, dataset_metadata)
+                    VALUES (%s, %s, %s, 'active', %s)
                     ON CONFLICT (session_id) DO NOTHING
                     """,
-                    (session_id, user_id, filename),
+                    (session_id, user_id, filename, json.dumps(dataset_metadata) if dataset_metadata else None),
                 )
 
-    def end_session(self, session_id: str) -> None:
-        """Mark session as completed and record end time."""
+    def end_session(self, session_id: str, end_reason: str = "normal") -> None:
+        """Mark session as completed and record end time and reason."""
         with get_conn() as conn:
             if conn is None:
                 return
@@ -51,10 +57,10 @@ class DatabaseLogger:
                 cur.execute(
                     """
                     UPDATE analysis_sessions
-                    SET status = 'completed', ended_at = NOW()
+                    SET status = 'completed', ended_at = NOW(), end_reason = %s
                     WHERE session_id = %s
                     """,
-                    (session_id,),
+                    (end_reason, session_id),
                 )
 
     # ------------------------------------------------------------------
@@ -70,6 +76,9 @@ class DatabaseLogger:
         result: str,
         duration_ms: float,
         status: str,
+        error_stacktrace: str | None = None,
+        turn_id: str | None = None,
+        call_index: int | None = None,
     ) -> None:
         """Persist a tool call record."""
         try:
@@ -81,17 +90,21 @@ class DatabaseLogger:
                         """
                         INSERT INTO tool_executions
                             (session_id, user_id, tool_name, args,
-                             result_preview, duration_ms, status)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s)
+                             result, duration_ms, status,
+                             error_stacktrace, turn_id, call_index)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         """,
                         (
                             session_id,
                             user_id,
                             tool_name,
                             json.dumps(args),
-                            result[:500] if len(result) > 500 else result,
+                            result,
                             round(duration_ms, 2),
                             status,
+                            error_stacktrace,
+                            turn_id,
+                            call_index,
                         ),
                     )
         except Exception as e:
@@ -108,6 +121,7 @@ class DatabaseLogger:
         message: str,
         response_time_ms: float,
         tool_called: bool = False,
+        turn_id: str | None = None,
     ) -> None:
         """Persist user message + agent turn metadata."""
         try:
@@ -119,15 +133,16 @@ class DatabaseLogger:
                     cur.execute(
                         """
                         INSERT INTO chat_messages
-                            (session_id, user_id, role, content, tool_called, response_ms)
-                        VALUES (%s, %s, 'user', %s, %s, %s)
+                            (session_id, user_id, role, content, tool_called, response_ms, turn_id)
+                        VALUES (%s, %s, 'user', %s, %s, %s, %s)
                         """,
                         (
                             session_id,
                             user_id,
-                            message[:2000] if len(message) > 2000 else message,
+                            message,
                             tool_called,
                             round(response_time_ms, 2),
+                            turn_id,
                         ),
                     )
                     # Bump message counter on the session
@@ -164,7 +179,7 @@ class DatabaseLogger:
                         (
                             session_id,
                             user_id,
-                            message[:2000] if len(message) > 2000 else message,
+                            message,
                         ),
                     )
                     return cur.fetchone()[0]

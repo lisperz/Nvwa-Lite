@@ -92,6 +92,9 @@ class EventLogger:
         result: str,
         duration_ms: float,
         status: str,
+        error_stacktrace: str | None = None,
+        turn_id: str | None = None,
+        call_index: int | None = None,
     ) -> None:
         """Log a tool execution event.
 
@@ -100,23 +103,32 @@ class EventLogger:
             session_id: Session identifier.
             tool_name: Name of the tool that was executed.
             args: Tool arguments.
-            result: Tool result (truncated for large outputs).
+            result: Tool result (full content, no truncation).
             duration_ms: Execution duration in milliseconds.
-            status: "success" or "failure".
+            status: "success" or "error".
+            error_stacktrace: Full traceback on error, None on success.
+            turn_id: UUID for the current turn (links tool calls to the user message).
+            call_index: 1-based index of this tool call within the turn.
         """
+        payload: dict[str, Any] = {
+            "args": args,
+            "result": result,
+            "duration_ms": round(duration_ms, 2),
+            "status": status,
+        }
+        if turn_id is not None:
+            payload["turn_id"] = turn_id
+        if call_index is not None:
+            payload["call_index"] = call_index
+        if error_stacktrace is not None:
+            payload["error_stacktrace"] = error_stacktrace
         entry = LogEntry(
             timestamp=datetime.utcnow().isoformat() + "Z",
             user_id=user_id,
             session_id=session_id,
             task_type=tool_name,
             event="tool_execution",
-            payload={
-                "args": args,
-                "result_preview": result[:500] if len(result) > 500 else result,
-                "result_length": len(result),
-                "duration_ms": round(duration_ms, 2),
-                "status": status,
-            },
+            payload=payload,
         )
         self.tool_logger.info(entry.to_json())
 
@@ -127,28 +139,32 @@ class EventLogger:
         message: str,
         response_time_ms: float,
         tool_called: bool = False,
+        turn_id: str | None = None,
     ) -> None:
         """Log a user interaction event.
 
         Args:
             user_id: User identifier.
             session_id: Session identifier.
-            message: User's message.
+            message: User's message (full content, no truncation).
             response_time_ms: Total response time in milliseconds.
             tool_called: Whether any tools were called.
+            turn_id: UUID for the current turn.
         """
+        payload: dict[str, Any] = {
+            "message": message,
+            "response_time_ms": round(response_time_ms, 2),
+            "tool_called": tool_called,
+        }
+        if turn_id is not None:
+            payload["turn_id"] = turn_id
         entry = LogEntry(
             timestamp=datetime.utcnow().isoformat() + "Z",
             user_id=user_id,
             session_id=session_id,
             task_type="chat_message",
             event="user_interaction",
-            payload={
-                "message_preview": message[:200] if len(message) > 200 else message,
-                "message_length": len(message),
-                "response_time_ms": round(response_time_ms, 2),
-                "tool_called": tool_called,
-            },
+            payload=payload,
         )
         self.interaction_logger.info(entry.to_json())
 

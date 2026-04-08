@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import logging
 import time
+import traceback
+import uuid
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -73,6 +75,18 @@ def create_agent(
     viz_block = viz_state.to_prompt_block() if viz_state else ""
     system_prompt = build_system_prompt(adata, dataset_state=dataset_state, viz_state_block=viz_block)
 
+    # Extract dataset metadata for session-start logging
+    clustering_key = next(
+        (k for k in adata.obs.columns if "leiden" in k or "louvain" in k), None
+    )
+    dataset_metadata = {
+        "n_cells": adata.n_obs,
+        "n_genes": adata.n_vars,
+        "has_umap": "X_umap" in adata.obsm,
+        "has_clustering": clustering_key is not None,
+        "clustering_key": clustering_key,
+    }
+
     # Initialize event logger if user_id and session_id provided
     event_logger = None
     db_logger = None
@@ -80,7 +94,10 @@ def create_agent(
         event_logger = EventLogger()
         db_logger = DatabaseLogger()
 
-    return AgentRunner(llm_with_tools, tools, system_prompt, event_logger, db_logger, user_id, session_id)
+    return AgentRunner(
+        llm_with_tools, tools, system_prompt, event_logger, db_logger,
+        user_id, session_id, dataset_metadata,
+    )
 
 
 class AgentRunner:
@@ -99,6 +116,7 @@ class AgentRunner:
         db_logger: DatabaseLogger | None = None,
         user_id: str | None = None,
         session_id: str | None = None,
+        dataset_metadata: dict | None = None,
     ) -> None:
         self._llm = llm_with_tools
         self._tools = {t.name: t for t in tools}
@@ -107,6 +125,7 @@ class AgentRunner:
         self._db_logger = db_logger
         self._user_id = user_id
         self._session_id = session_id
+        self._dataset_metadata = dataset_metadata
 
     def invoke(
         self,
@@ -116,10 +135,13 @@ class AgentRunner:
     ) -> AgentResponse:
         """Run the agent on a user query."""
         start_time = time.time()
+        turn_id = str(uuid.uuid4())
 
         # Ensure DB session row exists before logging anything
         if self._db_logger and self._user_id and self._session_id:
-            self._db_logger.ensure_session(self._user_id, self._session_id, filename)
+            self._db_logger.ensure_session(
+                self._user_id, self._session_id, filename, self._dataset_metadata
+            )
 
         messages = [SystemMessage(content=self._system_prompt)]
 
@@ -155,151 +177,178 @@ class AgentRunner:
             )
 
         tool_called = False
+        call_index = 0
         max_iterations = 5
+        hit_max_iterations = True
         total_input_tokens = 0
         total_output_tokens = 0
 
-        for _ in range(max_iterations):
-            response = self._llm.invoke(messages)
-            messages.append(response)
+        try:
+            for _ in range(max_iterations):
+                response = self._llm.invoke(messages)
+                messages.append(response)
 
-            # Extract token usage if available
-            if hasattr(response, "response_metadata"):
-                usage = response.response_metadata.get("token_usage", {})
-                if usage:
-                    total_input_tokens += usage.get("prompt_tokens", 0)
-                    total_output_tokens += usage.get("completion_tokens", 0)
+                # Extract token usage if available
+                if hasattr(response, "response_metadata"):
+                    usage = response.response_metadata.get("token_usage", {})
+                    if usage:
+                        total_input_tokens += usage.get("prompt_tokens", 0)
+                        total_output_tokens += usage.get("completion_tokens", 0)
 
-            if not response.tool_calls:
-                break
+                if not response.tool_calls:
+                    hit_max_iterations = False
+                    break
 
-            tool_called = True
-            for tool_call in response.tool_calls:
-                tool_name = tool_call["name"]
-                tool_args = tool_call["args"]
-                logger.info("Tool call: %s(%s)", tool_name, tool_args)
+                tool_called = True
+                for tool_call in response.tool_calls:
+                    tool_name = tool_call["name"]
+                    tool_args = tool_call["args"]
+                    call_index += 1
+                    logger.info("Tool call: %s(%s)", tool_name, tool_args)
 
-                tool_start = time.time()
-                tool_fn = self._tools.get(tool_name)
+                    tool_start = time.time()
+                    tool_fn = self._tools.get(tool_name)
 
-                if tool_fn is None:
-                    result = f"Error: Unknown tool '{tool_name}'."
-                else:
-                    try:
-                        result = tool_fn.invoke(tool_args)
-                        tool_duration = time.time() - tool_start
+                    if tool_fn is None:
+                        result = f"Error: Unknown tool '{tool_name}'."
+                    else:
+                        try:
+                            result = tool_fn.invoke(tool_args)
+                            tool_duration = time.time() - tool_start
 
-                        # Log successful tool execution
-                        if self._event_logger and self._user_id and self._session_id:
-                            self._event_logger.log_tool_execution(
-                                user_id=self._user_id,
-                                session_id=self._session_id,
-                                tool_name=tool_name,
-                                args=tool_args,
-                                result=str(result),
-                                duration_ms=tool_duration * 1000,
-                                status="success"
-                            )
-                        if self._db_logger and self._user_id and self._session_id:
-                            self._db_logger.log_tool_execution(
-                                user_id=self._user_id,
-                                session_id=self._session_id,
-                                tool_name=tool_name,
-                                args=tool_args,
-                                result=str(result),
-                                duration_ms=tool_duration * 1000,
-                                status="success"
-                            )
-                    except Exception as e:
-                        logger.exception("Tool execution failed: %s", tool_name)
-                        result = f"Error executing {tool_name}: {e}"
-                        tool_duration = time.time() - tool_start
+                            # Log successful tool execution
+                            if self._event_logger and self._user_id and self._session_id:
+                                self._event_logger.log_tool_execution(
+                                    user_id=self._user_id,
+                                    session_id=self._session_id,
+                                    tool_name=tool_name,
+                                    args=tool_args,
+                                    result=str(result),
+                                    duration_ms=tool_duration * 1000,
+                                    status="success",
+                                    turn_id=turn_id,
+                                    call_index=call_index,
+                                )
+                            if self._db_logger and self._user_id and self._session_id:
+                                self._db_logger.log_tool_execution(
+                                    user_id=self._user_id,
+                                    session_id=self._session_id,
+                                    tool_name=tool_name,
+                                    args=tool_args,
+                                    result=str(result),
+                                    duration_ms=tool_duration * 1000,
+                                    status="success",
+                                    turn_id=turn_id,
+                                    call_index=call_index,
+                                )
+                        except Exception as e:
+                            logger.exception("Tool execution failed: %s", tool_name)
+                            error_tb = traceback.format_exc()
+                            result = f"Error executing {tool_name}: {e}"
+                            tool_duration = time.time() - tool_start
 
-                        # Log failed tool execution
-                        if self._event_logger and self._user_id and self._session_id:
-                            self._event_logger.log_tool_execution(
-                                user_id=self._user_id,
-                                session_id=self._session_id,
-                                tool_name=tool_name,
-                                args=tool_args,
-                                result=str(e),
-                                duration_ms=tool_duration * 1000,
-                                status="error"
-                            )
-                        if self._db_logger and self._user_id and self._session_id:
-                            self._db_logger.log_tool_execution(
-                                user_id=self._user_id,
-                                session_id=self._session_id,
-                                tool_name=tool_name,
-                                args=tool_args,
-                                result=str(e),
-                                duration_ms=tool_duration * 1000,
-                                status="error"
-                            )
+                            # Log failed tool execution
+                            if self._event_logger and self._user_id and self._session_id:
+                                self._event_logger.log_tool_execution(
+                                    user_id=self._user_id,
+                                    session_id=self._session_id,
+                                    tool_name=tool_name,
+                                    args=tool_args,
+                                    result=str(e),
+                                    duration_ms=tool_duration * 1000,
+                                    status="error",
+                                    error_stacktrace=error_tb,
+                                    turn_id=turn_id,
+                                    call_index=call_index,
+                                )
+                            if self._db_logger and self._user_id and self._session_id:
+                                self._db_logger.log_tool_execution(
+                                    user_id=self._user_id,
+                                    session_id=self._session_id,
+                                    tool_name=tool_name,
+                                    args=tool_args,
+                                    result=str(e),
+                                    duration_ms=tool_duration * 1000,
+                                    status="error",
+                                    error_stacktrace=error_tb,
+                                    turn_id=turn_id,
+                                    call_index=call_index,
+                                )
 
-                messages.append(
-                    ToolMessage(content=str(result), tool_call_id=tool_call["id"])
-                )
+                    messages.append(
+                        ToolMessage(content=str(result), tool_call_id=tool_call["id"])
+                    )
 
-        final_text = response.content if response.content else ""
-        response_time = time.time() - start_time
+            final_text = response.content if response.content else ""
+            response_time = time.time() - start_time
+            end_reason = "max_iterations" if hit_max_iterations else "normal"
 
-        # Log user message with response time
-        if self._event_logger and self._user_id and self._session_id:
-            self._event_logger.log_user_message(
-                user_id=self._user_id,
-                session_id=self._session_id,
-                message=user_input,
-                response_time_ms=response_time * 1000,
-                tool_called=tool_called
-            )
-        if self._db_logger and self._user_id and self._session_id:
-            self._db_logger.log_user_message(
-                user_id=self._user_id,
-                session_id=self._session_id,
-                message=user_input,
-                response_time_ms=response_time * 1000,
-                tool_called=tool_called
-            )
-
-        # Log assistant response (always, even if empty)
-        if self._db_logger and self._user_id and self._session_id:
-            msg_id = self._db_logger.log_assistant_message(
-                user_id=self._user_id,
-                session_id=self._session_id,
-                message=final_text or "(no text response)",
-            )
-            # Persist any plots/tables generated this turn
-            if msg_id is not None:
-                from src.agent.tools import get_plot_results, get_table_results
-                plots = get_plot_results()
-                tables = get_table_results()
-                logger.info("Artifact logging: msg_id=%s plots=%d tables=%d", msg_id, len(plots), len(tables))
-                self._db_logger.log_artifacts(
-                    message_id=msg_id,
-                    session_id=self._session_id,
+            # Log user message with response time
+            if self._event_logger and self._user_id and self._session_id:
+                self._event_logger.log_user_message(
                     user_id=self._user_id,
-                    plot_results=plots,
-                    table_results=tables,
+                    session_id=self._session_id,
+                    message=user_input,
+                    response_time_ms=response_time * 1000,
+                    tool_called=tool_called,
+                    turn_id=turn_id,
+                )
+            if self._db_logger and self._user_id and self._session_id:
+                self._db_logger.log_user_message(
+                    user_id=self._user_id,
+                    session_id=self._session_id,
+                    message=user_input,
+                    response_time_ms=response_time * 1000,
+                    tool_called=tool_called,
+                    turn_id=turn_id,
                 )
 
-        # Log token usage
-        total_tokens = total_input_tokens + total_output_tokens
-        if self._event_logger and self._user_id and self._session_id and total_tokens > 0:
-            self._event_logger.log_token_usage(
-                user_id=self._user_id,
-                session_id=self._session_id,
-                input_tokens=total_input_tokens,
-                output_tokens=total_output_tokens,
-                model=self._llm.model_name if hasattr(self._llm, "model_name") else "gpt-4o-mini"
-            )
-        if self._db_logger and self._user_id and self._session_id and total_tokens > 0:
-            self._db_logger.log_token_usage(
-                user_id=self._user_id,
-                session_id=self._session_id,
-                input_tokens=total_input_tokens,
-                output_tokens=total_output_tokens,
-                model=self._llm.model_name if hasattr(self._llm, "model_name") else "gpt-4o-mini"
-            )
+            # Log assistant response (always, even if empty)
+            if self._db_logger and self._user_id and self._session_id:
+                msg_id = self._db_logger.log_assistant_message(
+                    user_id=self._user_id,
+                    session_id=self._session_id,
+                    message=final_text or "(no text response)",
+                )
+                # Persist any plots/tables generated this turn
+                if msg_id is not None:
+                    from src.agent.tools import get_plot_results, get_table_results
+                    plots = get_plot_results()
+                    tables = get_table_results()
+                    logger.info("Artifact logging: msg_id=%s plots=%d tables=%d", msg_id, len(plots), len(tables))
+                    self._db_logger.log_artifacts(
+                        message_id=msg_id,
+                        session_id=self._session_id,
+                        user_id=self._user_id,
+                        plot_results=plots,
+                        table_results=tables,
+                    )
 
-        return AgentResponse(text=final_text, tool_called=tool_called)
+            # Log token usage
+            total_tokens = total_input_tokens + total_output_tokens
+            if self._event_logger and self._user_id and self._session_id and total_tokens > 0:
+                self._event_logger.log_token_usage(
+                    user_id=self._user_id,
+                    session_id=self._session_id,
+                    input_tokens=total_input_tokens,
+                    output_tokens=total_output_tokens,
+                    model=self._llm.model_name if hasattr(self._llm, "model_name") else "gpt-4o-mini"
+                )
+            if self._db_logger and self._user_id and self._session_id and total_tokens > 0:
+                self._db_logger.log_token_usage(
+                    user_id=self._user_id,
+                    session_id=self._session_id,
+                    input_tokens=total_input_tokens,
+                    output_tokens=total_output_tokens,
+                    model=self._llm.model_name if hasattr(self._llm, "model_name") else "gpt-4o-mini"
+                )
+
+            if self._db_logger and self._user_id and self._session_id:
+                self._db_logger.end_session(self._session_id, end_reason)
+
+            return AgentResponse(text=final_text, tool_called=tool_called)
+
+        except Exception:
+            if self._db_logger and self._user_id and self._session_id:
+                self._db_logger.end_session(self._session_id, "error")
+            raise
