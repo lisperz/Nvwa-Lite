@@ -1,0 +1,88 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.11.13, pytest-9.0.3, pluggy-1.6.0 -- /Users/zhuchen/Downloads/Nvwa Bio Technical Challange/nvwa-lite/.venv/bin/python3
+cachedir: .pytest_cache
+rootdir: /Users/zhuchen/Downloads/Nvwa Bio Technical Challange/nvwa-lite
+configfile: pyproject.toml
+plugins: anyio-4.12.1, langsmith-0.7.1, zarr-3.1.5
+collecting ... collected 56 items
+
+tests/unit/test_layer1_tools.py::TestQCMetrics::test_resolve_percent_mito PASSED [  1%]
+tests/unit/test_layer1_tools.py::TestQCMetrics::test_resolve_ncount_rna PASSED [  3%]
+tests/unit/test_layer1_tools.py::TestQCMetrics::test_resolve_nfeature_rna PASSED [  5%]
+tests/unit/test_layer1_tools.py::TestQCMetrics::test_resolve_unknown_metric_returns_none PASSED [  7%]
+tests/unit/test_layer1_tools.py::TestQCMetrics::test_get_obs_column_statistics_mito PASSED [  8%]
+tests/unit/test_layer1_tools.py::TestQCMetrics::test_get_obs_column_statistics_ncount PASSED [ 10%]
+tests/unit/test_layer1_tools.py::TestQCMetrics::test_get_obs_column_statistics_invalid_column PASSED [ 12%]
+tests/unit/test_layer1_tools.py::TestQCMetrics::test_summarize_qc_metrics_returns_dataframe PASSED [ 14%]
+tests/unit/test_layer1_tools.py::TestQCMetrics::test_summarize_qc_metrics_covers_all_three PASSED [ 16%]
+tests/unit/test_layer1_tools.py::TestComposition::test_cross_tabulate_shape PASSED [ 17%]
+tests/unit/test_layer1_tools.py::TestComposition::test_cross_tabulate_total_cells PASSED [ 19%]
+tests/unit/test_layer1_tools.py::TestComposition::test_cross_tabulate_known_cell_type_count PASSED [ 21%]
+tests/unit/test_layer1_tools.py::TestComposition::test_cross_tabulate_no_negative_values PASSED [ 23%]
+tests/unit/test_layer1_tools.py::TestComposition::test_cross_tabulate_invalid_row_key_raises PASSED [ 25%]
+tests/unit/test_layer1_tools.py::TestComposition::test_cross_tabulate_invalid_col_key_raises PASSED [ 26%]
+tests/unit/test_layer1_tools.py::TestComposition::test_ceo_state_contamination PASSED [ 28%]
+tests/unit/test_layer1_tools.py::TestDifferentialExpression::test_run_de_all_groups_returns_deresult PASSED [ 30%]
+tests/unit/test_layer1_tools.py::TestDifferentialExpression::test_run_de_result_has_expected_columns PASSED [ 32%]
+tests/unit/test_layer1_tools.py::TestDifferentialExpression::test_run_de_target_group PASSED [ 33%]
+tests/unit/test_layer1_tools.py::TestDifferentialExpression::test_run_de_invalid_groupby_raises PASSED [ 35%]
+tests/unit/test_layer1_tools.py::TestDifferentialExpression::test_run_de_invalid_target_group_raises PASSED [ 37%]
+tests/unit/test_layer1_tools.py::TestDifferentialExpression::test_run_pairwise_de_two_conditions PASSED [ 39%]
+tests/unit/test_layer1_tools.py::TestDifferentialExpression::test_run_pairwise_de_invalid_group_raises PASSED [ 41%]
+tests/unit/test_layer1_tools.py::TestDifferentialExpression::test_get_de_dataframe_after_run PASSED [ 42%]
+tests/unit/test_layer1_tools.py::TestDifferentialExpression::test_get_de_dataframe_no_results_raises PASSED [ 44%]
+tests/unit/test_layer1_tools.py::TestDifferentialExpression::test_run_de_n_genes_zero_returns_all PASSED [ 46%]
+tests/unit/test_layer1_tools.py::TestDifferentialExpression::test_ceo_pairwise_de_cell_type_filter PASSED [ 48%]
+tests/unit/test_layer1_tools.py::TestMarkerGenes::test_get_top_markers_per_cluster_returns_list PASSED [ 50%]
+tests/unit/test_layer1_tools.py::TestMarkerGenes::test_get_top_markers_per_cluster_count PASSED [ 51%]
+tests/unit/test_layer1_tools.py::TestMarkerGenes::test_get_top_markers_per_cluster_exact_structure PASSED [ 53%]
+tests/unit/test_layer1_tools.py::TestMarkerGenes::test_get_top_markers_overall_returns_list PASSED [ 55%]
+tests/unit/test_layer1_tools.py::TestMarkerGenes::test_no_de_results_raises PASSED [ 57%]
+tests/unit/test_layer1_tools.py::TestMarkerGenes::test_ceo_top_n_per_cell_type_not_global PASSED [ 58%]
+tests/unit/test_layer1_tools.py::TestCalculations::test_calculate_cluster_averages_shape PASSED [ 60%]
+tests/unit/test_layer1_tools.py::TestCalculations::test_calculate_cluster_averages_invalid_gene PASSED [ 62%]
+tests/unit/test_layer1_tools.py::TestCalculations::test_calculate_cluster_averages_invalid_groupby PASSED [ 64%]
+tests/unit/test_layer1_tools.py::TestCalculations::test_find_top_expressing_cluster_returns_tuple PASSED [ 66%]
+tests/unit/test_layer1_tools.py::TestCalculations::test_find_top_expressing_cluster_tnnt2_is_cardiomyocyte PASSED [ 67%]
+tests/unit/test_layer1_tools.py::TestCalculations::test_get_metadata_summary_returns_dataframe PASSED [ 69%]
+tests/unit/test_layer1_tools.py::TestCalculations::test_get_metadata_summary_includes_cell_type PASSED [ 71%]
+tests/unit/test_layer1_tools.py::TestCalculations::test_ceo_mki67_returns_cell_type_not_cluster_id PASSED [ 73%]
+tests/unit/test_layer1_tools.py::TestPlotting::test_plot_umap_by_cell_type PASSED [ 75%]
+tests/unit/test_layer1_tools.py::TestPlotting::test_plot_umap_by_seurat_clusters PASSED [ 76%]
+tests/unit/test_layer1_tools.py::TestPlotting::test_plot_umap_invalid_color_raises PASSED [ 78%]
+tests/unit/test_layer1_tools.py::TestPlotting::test_plot_violin_single_gene PASSED [ 80%]
+tests/unit/test_layer1_tools.py::TestPlotting::test_plot_violin_qc_metric PASSED [ 82%]
+tests/unit/test_layer1_tools.py::TestPlotting::test_plot_violin_invalid_gene_raises PASSED [ 83%]
+tests/unit/test_layer1_tools.py::TestPlotting::test_plot_feature_returns_valid_png PASSED [ 85%]
+tests/unit/test_layer1_tools.py::TestPlotting::test_plot_feature_invalid_gene_raises PASSED [ 87%]
+tests/unit/test_layer1_tools.py::TestPlotting::test_plot_dotplot_returns_valid_png PASSED [ 89%]
+tests/unit/test_layer1_tools.py::TestPlotting::test_plot_heatmap_returns_valid_png PASSED [ 91%]
+tests/unit/test_layer1_tools.py::TestPlotting::test_plot_scatter_qc_metrics PASSED [ 92%]
+tests/unit/test_layer1_tools.py::TestPlotting::test_plot_volcano_returns_valid_png PASSED [ 94%]
+tests/unit/test_layer1_tools.py::TestPlotting::test_ceo_umap_legend_present PASSED [ 96%]
+tests/unit/test_layer1_tools.py::TestPlotting::test_ceo_umap_split_by_and_color_by_independent PASSED [ 98%]
+tests/unit/test_layer1_tools.py::TestPlotting::test_plot_feature_split_by PASSED [100%]
+
+=============================== warnings summary ===============================
+tests/unit/test_layer1_tools.py::TestComposition::test_cross_tabulate_shape
+tests/unit/test_layer1_tools.py::TestComposition::test_cross_tabulate_total_cells
+tests/unit/test_layer1_tools.py::TestComposition::test_cross_tabulate_known_cell_type_count
+tests/unit/test_layer1_tools.py::TestComposition::test_cross_tabulate_no_negative_values
+tests/unit/test_layer1_tools.py::TestComposition::test_ceo_state_contamination
+tests/unit/test_layer1_tools.py::TestComposition::test_ceo_state_contamination
+  /Users/zhuchen/Downloads/Nvwa Bio Technical Challange/nvwa-lite/src/analysis/composition.py:77: FutureWarning: The default of observed=False is deprecated and will be changed to True in a future version of pandas. Pass observed=False to retain current behavior or observed=True to adopt the future default and silence this warning.
+    crosstab = adata.obs.groupby([row_key, col_key]).size().unstack(fill_value=0)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+============================= slowest 10 durations =============================
+28.39s call     tests/unit/test_layer1_tools.py::TestDifferentialExpression::test_run_de_all_groups_returns_deresult
+22.27s call     tests/unit/test_layer1_tools.py::TestDifferentialExpression::test_run_de_result_has_expected_columns
+21.26s setup    tests/unit/test_layer1_tools.py::TestDifferentialExpression::test_get_de_dataframe_after_run
+15.51s call     tests/unit/test_layer1_tools.py::TestDifferentialExpression::test_run_de_n_genes_zero_returns_all
+14.20s call     tests/unit/test_layer1_tools.py::TestDifferentialExpression::test_run_de_target_group
+8.03s call     tests/unit/test_layer1_tools.py::TestDifferentialExpression::test_run_pairwise_de_two_conditions
+1.47s call     tests/unit/test_layer1_tools.py::TestDifferentialExpression::test_ceo_pairwise_de_cell_type_filter
+1.44s setup    tests/unit/test_layer1_tools.py::TestQCMetrics::test_resolve_percent_mito
+1.05s call     tests/unit/test_layer1_tools.py::TestDifferentialExpression::test_run_de_invalid_groupby_raises
+0.85s call     tests/unit/test_layer1_tools.py::TestPlotting::test_plot_feature_split_by
+================== 56 passed, 6 warnings in 118.72s (0:01:58) ==================
