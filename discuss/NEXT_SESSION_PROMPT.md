@@ -1,14 +1,69 @@
 # Session Summary — 2026-04-07 (Latest Update)
 
+## Session Summary — 2026-04-07 (Part 2)
+
+### Layer 1 Unit Tests — Temple PI Dataset ✅ PR OPEN
+
+**Context:** Deliverable from Yalu (CEO): every Layer 1 tool must have at least one passing test on the Temple dataset, with known CEO failure cases covered and results reviewable by CEO + CTO.
+
+**Status:** ✅ 56/56 tests passing. PR #11 open on `lisperz/Nvwa-Lite`, PR #12 open on `yzhou-nvwa/nvwa-mvp`. Both self-merge eligible after 24h (no `src/agent/` or `src/analysis/` changes).
+
+#### What Was Built
+
+**`tests/unit/test_layer1_tools.py`** — 56 tests across 6 sections, all using the real Temple dataset (`GSE223414_slim.h5ad`, 45,460 cells):
+
+| Section | Tests | What it verifies |
+|---|---|---|
+| QC Metrics | 9 | Exact stats (mean, min, max, n_cells) against known dataset values |
+| Composition | 7 | Exact cell counts, shape (12×8), state isolation |
+| Differential Expression | 11 | DEResult structure, columns, n_genes=0 sentinel, error handling |
+| Marker Genes | 6 | Per-cluster dict structure, list deduplication |
+| Calculations | 8 | Biological correctness (TNNT2 → cardiomyocyte, MKI67 cell type) |
+| Plotting | 15 | Valid PNG bytes + actual image files saved for visual review |
+
+**4 CEO bug tests — all confirmed passing:**
+- `test_ceo_state_contamination` — same query returns identical 45,460 both runs ✅
+- `test_ceo_pairwise_de_cell_type_filter` — Early cardiomyocyte DE completes, no loop ✅
+- `test_ceo_top_n_per_cell_type_not_global` — each cell type has its own top genes ✅
+- `test_ceo_mki67_returns_cell_type_not_cluster_id` — returns cell type name, not "0" ✅
+
+**`scripts/run_layer1_tests.sh`** — one-command test runner, auto-saves report to `local/reports/unit/`.
+
+**`test-records/2026-04-07_layer1-baseline.txt`** — full pass/fail log committed for CEO/CTO review.
+
+**`test-records/2026-04-07_layer1-plots/`** — 13 PNG images committed (one per plotting test) for CEO/CTO visual verification.
+
+#### Key Findings Discovered During Testing
+
+1. **Temple dataset embedding keys are non-standard** — stored as `UMAP`/`PCA` (DataFrames), not `X_umap`/`X_pca` (numpy arrays). The fixture converts them automatically with `np.array()`.
+2. **`percent.mito` not in auto-detect list** — `summarize_qc_metrics()` auto-detects `pct_counts_mt`, `percent.mt`, `percent_mito` but NOT `percent.mito` (dot-separated). Must be passed explicitly for this dataset.
+3. **Early cardiomyocyte subset only has D10/D14 conditions** — not D5. The CEO test D2 pairwise DE is reproduced using whichever Control/PA-IVS conditions actually exist in the subset.
+
+#### Files Added
+
+| File | What it is |
+|---|---|
+| `tests/unit/test_layer1_tools.py` | 56 Layer 1 unit tests |
+| `scripts/run_layer1_tests.sh` | Shell runner with auto-report |
+| `test-records/2026-04-07_layer1-baseline.txt` | Committed pass/fail record |
+| `test-records/2026-04-07_layer1-plots/` | 13 plot PNGs for visual review |
+| `docs/UNIT_TESTING_GUIDE.md` | Guide for writing future Layer 1 tests |
+
+#### PRs
+- Fork: https://github.com/lisperz/Nvwa-Lite/pull/5
+- Production: https://github.com/yzhou-nvwa/nvwa-mvp/pull/12
+
+---
+
 ## Session Summary — 2026-04-07
 
-### Condition-Split Feature Plot + Cell-Type Subset Analysis + Matrix Dot Plot — ✅ COMPLETE (LOCAL, TESTED)
+### Condition-Split Feature Plot + Cell-Type Subset Analysis + Matrix Dot Plot — ✅ MERGED & DEPLOYED
 
 **Context:** Reviewer feedback on two failure cases:
 1. "Plot TNNT2 expression split by condition. Is there a difference between PA-IVS and normal cardiomyocytes?" — agent generated unsplit global UMAP, no cardiomyocyte-specific comparison
 2. "How does NKX2-5 expression vary across different cell types in disease vs normal?" — agent defaulted to cardiomyocyte-only violin instead of cross-cell-type comparison
 
-**Status:** ✅ All fixes implemented and tested locally. Needs PR to upstream.
+**Status:** ✅ PR #10 merged to `yzhou-nvwa/nvwa-mvp` main. Both repos synced. Ready for next feature.
 
 ### What Was Completed
 
@@ -58,15 +113,14 @@
 
 | File | Status | What Changed |
 |---|---|---|
-| `src/plotting/executor.py` | ✅ | `plot_feature()` supports `split_by` with GridSpec + dedicated colorbar column |
-| `src/agent/tools.py` | ✅ | `dotplot_matrix` rewritten (fixed broken refs); added to `get_all_tools()`; `dotplot_combined` docstring fixed (syntax error); `feature_plot` has `split_by`; `subset_tools` wired in |
-| `src/agent/subset_tools.py` | ✅ NEW | `subset_violin_plot`, `subset_feature_plot`, multi-value matching, condition coverage, quantitative summary |
-| `src/agent/prompts.py` | ✅ | COMPOUND QUERY section; Type A/B distinction; Example 2 (NKX2-5); duplicate bullets removed |
+| `src/plotting/executor.py` | ✅ MERGED | `plot_feature()` supports `split_by` with GridSpec + dedicated colorbar column |
+| `src/agent/tools.py` | ✅ MERGED | `dotplot_matrix` rewritten (fixed broken refs); added to `get_all_tools()`; `dotplot_combined` docstring fixed (syntax error); `feature_plot` has `split_by`; `subset_tools` wired in |
+| `src/agent/subset_tools.py` | ✅ MERGED (NEW) | `subset_violin_plot`, `subset_feature_plot`, multi-value matching, condition coverage, quantitative summary |
+| `src/agent/prompts.py` | ✅ MERGED | COMPOUND QUERY section; Type A/B distinction; Example 2 (NKX2-5); duplicate bullets removed |
 
-### Next Session Priorities
+### Next Session
 
-1. **Create PR to upstream** — All local changes tested and working. Create PR to `yzhou-nvwa/nvwa-mvp`
-2. **Deploy to EC2** — After PR merges, pull and restart container
+Ready for new feature development. Repos synced with upstream main (includes PR #10 + other developers' recent merges).
 
 ### Key Design Decisions Made
 
