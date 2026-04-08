@@ -19,6 +19,7 @@ Run with:
 
 from __future__ import annotations
 
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -32,7 +33,9 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-DATASET_PATH = Path("/Users/zhuchen/Downloads/GSE223414_slim.h5ad")
+DATASET_PATH = Path(
+    os.environ.get("TEMPLE_DATASET_PATH", "/Users/zhuchen/Downloads/GSE223414_slim.h5ad")
+)
 
 PNG_MAGIC = b"\x89PNG"
 MIN_PLOT_BYTES = 5_000  # same threshold as integration runner
