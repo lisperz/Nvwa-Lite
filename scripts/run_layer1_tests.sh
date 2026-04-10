@@ -10,6 +10,9 @@
 #   Console: live pass/fail per test
 #   File:    local/reports/unit/layer1_YYYYMMDD_HHMMSS.txt
 #   Record:  copy to test-records/ manually when satisfied
+#
+# To also save plot PNGs to test-records/ for visual review:
+#   SAVE_TEST_PLOTS=1 bash scripts/run_layer1_tests.sh
 
 set -euo pipefail
 
