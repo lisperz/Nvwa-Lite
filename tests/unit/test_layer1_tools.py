@@ -40,7 +40,11 @@ DATASET_PATH = Path(
 PNG_MAGIC = b"\x89PNG"
 MIN_PLOT_BYTES = 5_000  # same threshold as integration runner
 
-# Plot images are saved here for CEO/CTO visual review
+# Set SAVE_TEST_PLOTS=1 to write plot PNGs to test-records/ for visual review.
+# Default is off so routine test runs never write files to the tracked directory.
+_SAVE_PLOTS: bool = os.environ.get("SAVE_TEST_PLOTS", "0") == "1"
+
+# Plot images are saved here when SAVE_TEST_PLOTS=1
 _PLOT_DIR = (
     _REPO_ROOT
     / "test-records"
@@ -101,11 +105,14 @@ def _valid_png(image: bytes) -> bool:
 
 @pytest.fixture(scope="module")
 def plot_dir() -> Path:
-    """Create and return the dated plot output directory in test-records/.
+    """Return the dated plot output directory in test-records/.
 
-    All plot images generated during tests are saved here for CEO/CTO review.
+    The directory is only created when SAVE_TEST_PLOTS=1. Without the flag,
+    the path is returned but nothing is written — callers guard writes with
+    `if _SAVE_PLOTS`.
     """
-    _PLOT_DIR.mkdir(parents=True, exist_ok=True)
+    if _SAVE_PLOTS:
+        _PLOT_DIR.mkdir(parents=True, exist_ok=True)
     return _PLOT_DIR
 
 
@@ -567,7 +574,8 @@ class TestPlotting:
 
         assert isinstance(result, PlotResult)
         assert _valid_png(result.image)
-        (plot_dir / "umap_by_cell_type.png").write_bytes(result.image)
+        if _SAVE_PLOTS:
+            (plot_dir / "umap_by_cell_type.png").write_bytes(result.image)
 
     def test_plot_umap_by_seurat_clusters(self, adata, plot_dir):
         """plot_umap colored by seurat_clusters returns valid PNG."""
@@ -575,7 +583,8 @@ class TestPlotting:
         result = plot_umap(adata, color="seurat_clusters")
 
         assert _valid_png(result.image)
-        (plot_dir / "umap_by_seurat_clusters.png").write_bytes(result.image)
+        if _SAVE_PLOTS:
+            (plot_dir / "umap_by_seurat_clusters.png").write_bytes(result.image)
 
     def test_plot_umap_invalid_color_raises(self, adata):
         """plot_umap with non-existent color key raises ValueError."""
@@ -589,7 +598,8 @@ class TestPlotting:
         result = plot_violin(adata, genes=["TNNT2"], groupby="cell_type")
 
         assert _valid_png(result.image)
-        (plot_dir / "violin_TNNT2_by_cell_type.png").write_bytes(result.image)
+        if _SAVE_PLOTS:
+            (plot_dir / "violin_TNNT2_by_cell_type.png").write_bytes(result.image)
 
     def test_plot_violin_qc_metric(self, adata, plot_dir):
         """plot_violin accepts QC obs columns (percent.mito) as input."""
@@ -597,7 +607,8 @@ class TestPlotting:
         result = plot_violin(adata, genes=["percent.mito"], groupby="cell_type")
 
         assert _valid_png(result.image)
-        (plot_dir / "violin_pct_mito_by_cell_type.png").write_bytes(result.image)
+        if _SAVE_PLOTS:
+            (plot_dir / "violin_pct_mito_by_cell_type.png").write_bytes(result.image)
 
     def test_plot_violin_invalid_gene_raises(self, adata):
         """plot_violin with non-existent gene raises ValueError."""
@@ -611,7 +622,8 @@ class TestPlotting:
         result = plot_feature(adata, gene="TNNT2")
 
         assert _valid_png(result.image)
-        (plot_dir / "feature_TNNT2.png").write_bytes(result.image)
+        if _SAVE_PLOTS:
+            (plot_dir / "feature_TNNT2.png").write_bytes(result.image)
 
     def test_plot_feature_invalid_gene_raises(self, adata):
         """plot_feature with non-existent gene raises ValueError."""
@@ -625,7 +637,8 @@ class TestPlotting:
         result = plot_dotplot(adata, genes=["TNNT2", "NKX2-5"], groupby="cell_type")
 
         assert _valid_png(result.image)
-        (plot_dir / "dotplot_TNNT2_NKX25_by_cell_type.png").write_bytes(result.image)
+        if _SAVE_PLOTS:
+            (plot_dir / "dotplot_TNNT2_NKX25_by_cell_type.png").write_bytes(result.image)
 
     def test_plot_heatmap_returns_valid_png(self, adata, plot_dir):
         """plot_heatmap for TNNT2 + NKX2-5 grouped by cell_type returns valid PNG."""
@@ -633,7 +646,8 @@ class TestPlotting:
         result = plot_heatmap(adata, genes=["TNNT2", "NKX2-5"], groupby="cell_type")
 
         assert _valid_png(result.image)
-        (plot_dir / "heatmap_TNNT2_NKX25_by_cell_type.png").write_bytes(result.image)
+        if _SAVE_PLOTS:
+            (plot_dir / "heatmap_TNNT2_NKX25_by_cell_type.png").write_bytes(result.image)
 
     def test_plot_scatter_qc_metrics(self, adata, plot_dir):
         """plot_scatter of nCount_RNA vs nFeature_RNA returns valid PNG."""
@@ -641,7 +655,8 @@ class TestPlotting:
         result = plot_scatter(adata, gene_x="nCount_RNA", gene_y="nFeature_RNA")
 
         assert _valid_png(result.image)
-        (plot_dir / "scatter_nCount_vs_nFeature.png").write_bytes(result.image)
+        if _SAVE_PLOTS:
+            (plot_dir / "scatter_nCount_vs_nFeature.png").write_bytes(result.image)
 
     def test_plot_volcano_returns_valid_png(self, adata_with_de, plot_dir):
         """plot_volcano from DE results returns valid PNG."""
@@ -652,7 +667,8 @@ class TestPlotting:
         result = plot_volcano(de_df, group="Early cardiomyocyte")
 
         assert _valid_png(result.image)
-        (plot_dir / "volcano_early_cardiomyocyte.png").write_bytes(result.image)
+        if _SAVE_PLOTS:
+            (plot_dir / "volcano_early_cardiomyocyte.png").write_bytes(result.image)
 
     # --- CEO bug: UMAP legend present (B1) ---
     def test_ceo_umap_legend_present(self, adata, plot_dir):
@@ -669,8 +685,9 @@ class TestPlotting:
         assert _valid_png(with_legend.image)
         assert _valid_png(without_legend.image)
         assert len(with_legend.image) >= len(without_legend.image)
-        (plot_dir / "ceo_b1_umap_WITH_legend.png").write_bytes(with_legend.image)
-        (plot_dir / "ceo_b1_umap_WITHOUT_legend.png").write_bytes(without_legend.image)
+        if _SAVE_PLOTS:
+            (plot_dir / "ceo_b1_umap_WITH_legend.png").write_bytes(with_legend.image)
+            (plot_dir / "ceo_b1_umap_WITHOUT_legend.png").write_bytes(without_legend.image)
 
     # --- CEO bug: split_by and color_by are independent (B2) ---
     def test_ceo_umap_split_by_and_color_by_independent(self, adata, plot_dir):
@@ -685,7 +702,8 @@ class TestPlotting:
 
         assert _valid_png(result.image)
         assert "cell_type" in result.message or "split" in result.message
-        (plot_dir / "ceo_b2_umap_split_by_condition_color_by_cell_type.png").write_bytes(result.image)
+        if _SAVE_PLOTS:
+            (plot_dir / "ceo_b2_umap_split_by_condition_color_by_cell_type.png").write_bytes(result.image)
 
     def test_plot_feature_split_by(self, adata, plot_dir):
         """plot_feature with split_by produces multi-panel PNG."""
@@ -694,4 +712,5 @@ class TestPlotting:
 
         assert _valid_png(result.image)
         assert "split" in result.message.lower()
-        (plot_dir / "feature_TNNT2_split_by_condition.png").write_bytes(result.image)
+        if _SAVE_PLOTS:
+            (plot_dir / "feature_TNNT2_split_by_condition.png").write_bytes(result.image)
