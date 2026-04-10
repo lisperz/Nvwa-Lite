@@ -1,6 +1,6 @@
 # Nvwa Bio — Tool Trigger Map & Scenario Guide
 *For: Yuxin (Layer 2a keyword coverage) + Chen (tool implementation scope)*
-*From: Yalu (CEO) · Last updated: April 8, 2026*
+*From: Yalu (CEO) · Last updated: April 9, 2026*
 
 ---
 
@@ -142,16 +142,16 @@ This document defines every user scenario the agent must handle, what tools it s
 | | |
 |---|---|
 | **Keywords** | (triggered when gene is not found, or user provides protein name / mouse gene name) |
-| **Tools** | `gene_name_lookup(query)` |
+| **Tools** | `lookup_gene(query)` |
 | **Behavior** | Three cases require gene name resolution: (1) User provides protein name instead of gene name (e.g. 'CD3 protein' instead of CD3E). (2) User provides mouse gene name instead of human (e.g. Cd3e instead of CD3E). (3) User provides a gene that does not exist in the dataset. Agent must: look up the correct gene name, confirm with user before plotting, never silently substitute. |
-| **Layer 1 test** | gene_name_lookup returns correct human gene symbol for common protein names and mouse orthologs. Returns clear 'not found' message for non-existent genes. |
+| **Layer 1 test** | lookup_gene returns correct human gene symbol for common protein names and mouse orthologs. Returns clear 'not found' message for non-existent genes. |
 
 ### C5 — Non-existent gene
 
 | | |
 |---|---|
 | **Keywords** | (triggered automatically when gene is not found in adata.var after lookup) |
-| **Tools** | `gene_name_lookup(query)` — if still not found, return error |
+| **Tools** | `lookup_gene(query)` — if still not found, return error |
 | **Behavior** | If gene is not found after lookup: (1) Report clearly that the gene was not found. (2) Suggest similar gene names if any exist (e.g. TNSF11 → TNFSF11A). (3) Never plot an empty or zero-expression result without flagging it. Agent must not silently auto-substitute. |
 | **Layer 1 test** | Agent returns error with suggestion when gene not found. Does not produce empty plots silently. |
 
@@ -289,6 +289,6 @@ These bugs must be fixed before first customer delivery.
 |----------|------|--------|
 | A3 — Doublet scatter plot | `scatter_plot(nCount vs nFeature)` | Not critical for V1.0 launch |
 | A4 — Condition balance bar chart | Bar chart from cell_count_table | Number table sufficient for V1.0 |
-| B4 — Cell composition barplot | `composition_barplot` | Stacked chart deferred; table sufficient for V1.0 |
+| B4 — Cell composition barplot | `composition_barplot` | Number table sufficient for V1.0 |
 | E2 — User-facing annotation correction | `update_annotation()` | V1.0 assumes finalized annotations; no live UMAP update needed |
 | E3 — User-facing research intent tracking | Cross-session memory | Requires cross-session memory feature not yet built |
