@@ -300,15 +300,31 @@ tests:
     category: interpretation
     prompt: "Is this a healthy dataset?"
     expected_status: PASS
-    must_contain:
-      - "general"
+    expected_artifact_count: 0
     notes: >
-      Biological interpretation question — no tool can assess dataset health.
-      Agent must answer using general biological knowledge AND include a
-      disclaimer that this is not an analysis of the user's specific data.
-      PASS example: "This is based on general biological knowledge, not an
-      analysis of your dataset."
-      FAIL: confident verdict with no disclaimer.
+      KNOWN FAIL — deferred pending T-013 (router wired into core.py).
+      Root cause: query is genuinely ambiguous — "Is this a healthy dataset?" can
+      legitimately be read as a QC request OR a general biology question. Model maps
+      it to QC/Overview intent and calls summarize_qc_metrics before reaching the
+      Interpretation rule. Two prompt patches attempted (Interpretation entry in Fast
+      Track, carve-out in PROBE-FIRST rule) — neither held. Correct fix is a code-level
+      gate in core.py that routes Layer 2b queries away from tool execution. Revisit
+      after T-013.
+
+  - case_id: INT-02
+    category: interpretation
+    prompt: "What does high mitochondrial percentage typically indicate in scRNA-seq data?"
+    expected_status: PASS
+    expected_artifact_count: 0
+    notes: >
+      Unambiguous general biology question — no reasonable interpretation calls for
+      running a tool. Unlike INT-01, this cannot be misconstrued as a data analysis
+      request. Agent must answer from biological knowledge and include a disclaimer.
+      PASS example: "This is based on general biological knowledge, not an analysis
+      of your specific dataset."
+      FAIL = model called a tool or answered without a disclaimer.
+      Diagnostic value: if INT-02 passes and INT-01 fails, INT-01 is confirmed as an
+      ambiguity edge case requiring T-013 (router), not a fundamental behavior gap.
 
   # ── artifact_interaction ─────────────────────────────────────────────────────
   # Agent references or acts on a prior session output (plot, table, export result).
