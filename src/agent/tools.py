@@ -17,6 +17,7 @@ from src.agent import analysis_tools
 from src.agent import subset_tools
 from src.agent.viz_state import update_viz_state
 from src.analysis.calculations import calculate_mito_percentage, get_metadata_summary
+from src.analysis.gene_lookup import lookup_gene_name
 from src.analysis.composition import cross_tabulate_metadata
 from src.analysis.differential import get_de_dataframe, run_differential_expression, run_pairwise_de, get_all_de_results
 from src.analysis.marker_genes import get_top_marker_genes_per_cluster
@@ -1409,6 +1410,26 @@ def get_cluster_mapping(groupby: str = "") -> str:
         return f"Unexpected error: {e}"
 
 
+@tool
+def lookup_gene(gene_name: str) -> str:
+    """Look up a gene name in the loaded dataset, resolving typos, case mismatches, and species prefixes.
+
+    Use this tool when:
+    - A gene is not found by other tools
+    - The user may have entered a protein name, alias, or wrong-species name
+    - You want to confirm a gene exists before plotting
+
+    If resolved, returns the exact gene name to use and proceeds.
+    If unresolved, returns top fuzzy candidates for the user to confirm.
+
+    Args:
+        gene_name: The gene name to look up (e.g. 'TNNT2', 'Tnnt2', 'tnnt2').
+    """
+    adata = _get_adata()
+    result = lookup_gene_name(adata, gene_name)
+    return result.message
+
+
 def get_all_tools() -> list:
     """Return all tools for the agent."""
     return [
@@ -1422,6 +1443,8 @@ def get_all_tools() -> list:
         calculate_mito_pct, summarize_obs_column, summarize_qc_metrics_tool,
         # Cluster resolution tools
         get_cluster_mapping,
+        # Gene lookup tool
+        lookup_gene,
         # Table tools
         get_de_results_table, get_pairwise_de_table,
         # Analysis/reasoning tools
