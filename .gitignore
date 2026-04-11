@@ -25,6 +25,9 @@ data/uploads/
 # everything not shared (local only)
 local/
 
+# Personal Claude Code instructions (not shared)
+CLAUDE.md
+
 # Pilot tokens (contains sensitive authentication data)
 pilot_tokens.json
 pilot_tokens.env
