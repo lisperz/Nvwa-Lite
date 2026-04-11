@@ -177,7 +177,7 @@ class AgentRunner:
             )
 
         tool_called = False
-        call_index = 0
+        call_index = -1
         max_iterations = 5
         hit_max_iterations = True
         total_input_tokens = 0
@@ -309,6 +309,7 @@ class AgentRunner:
                     user_id=self._user_id,
                     session_id=self._session_id,
                     message=final_text or "(no text response)",
+                    turn_id=turn_id,
                 )
                 # Persist any plots/tables generated this turn
                 if msg_id is not None:

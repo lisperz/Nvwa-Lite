@@ -14,7 +14,7 @@
 
 set -e
 
-SSH_KEY="/Users/zhuchen/Downloads/nvwa-key.pem"
+SSH_KEY="$HOME/Downloads/nvwa-key.pem"
 EC2_HOST="ubuntu@3.150.203.87"
 RDS_HOST="nvwa-pilot-db.cj42ock2ykh4.us-east-2.rds.amazonaws.com"
 LOCAL_PORT=5433

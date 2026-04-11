@@ -162,6 +162,7 @@ class DatabaseLogger:
         user_id: str,
         session_id: str,
         message: str,
+        turn_id: str | None = None,
     ) -> int | None:
         """Persist assistant response to chat_messages. Returns the new row id."""
         try:
@@ -172,14 +173,15 @@ class DatabaseLogger:
                     cur.execute(
                         """
                         INSERT INTO chat_messages
-                            (session_id, user_id, role, content, tool_called, response_ms)
-                        VALUES (%s, %s, 'assistant', %s, false, null)
+                            (session_id, user_id, role, content, tool_called, response_ms, turn_id)
+                        VALUES (%s, %s, 'assistant', %s, false, null, %s)
                         RETURNING id
                         """,
                         (
                             session_id,
                             user_id,
                             message,
+                            turn_id,
                         ),
                     )
                     return cur.fetchone()[0]

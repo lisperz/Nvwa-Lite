@@ -1,40 +1,67 @@
 # Regression test suite for nvwa-mvp scRNA visualization
+# v3.0 — full rewrite with unified category taxonomy (2026-04-09)
 #
 # Run via:
 #   python scripts/run_tests.py --dataset /abs/path/to/data.h5ad
 #   python scripts/run_tests.py --dataset /abs/path/to/data.h5ad --limit 3
+#   python scripts/run_tests.py --dataset /abs/path/to/data.h5ad --cases DA-01,OOS-01
 #
 # Schema per case:
-#   case_id          - unique identifier
-#   category         - happy_path | input_error | resource_scale | out_of_scope
+#   case_id          - unique identifier (prefix encodes category)
+#   category         - see definitions below
 #   prompt           - natural-language query sent to the agent
 #   expected_status  - PASS (success), FAIL (error/refusal expected), WARN (best-effort)
 #   must_contain     - case-insensitive substrings that MUST appear in final_text
 #   must_not_contain - substrings that must NOT appear (optional)
-#   expected_artifacts - filename glob patterns; checked only if discoverable (optional)
-#   notes            - human-readable context or conditions for manual tests (optional)
+#   requires_plot    - assert at least one valid PlotResult was produced (optional)
+#   requires_table   - assert at least one valid TableResult was produced (optional)
+#   expected_artifact_count - exact plot+table count expected (optional)
+#   requires_precomputed_umap - pre-flight skip if X_umap absent (optional)
+#   notes            - human-readable context; conditions for manual tests (optional)
+#
+# Category definitions:
+#   data_analysis        Agent is expected to call a tool (plot, QC, DE, export, stats).
+#                        expected_status PASS = valid inputs produced artifact(s);
+#                        FAIL = bad/missing inputs, agent must report clearly.
+#
+#   interpretation       Agent answers a biological "why / what does this mean" question
+#                        using general knowledge (no tool call).
+#                        PASS requires a general-knowledge disclaimer in the response;
+#                        FAIL = agent answered confidently with no disclaimer.
+#
+#   artifact_interaction Agent references a prior session output (plot, table, export).
+#                        PASS = agent handles gracefully (e.g. regenerates with new params);
+#                        FAIL = agent refused without taking any action.
+#
+#   out_of_scope         Feature not in V1.0 scope; agent must decline without crashing.
+#
+#   resource_scale       Large, compound, or multi-step requests. Always WARN (best-effort).
+#
+# Legacy: v1 cases (HP/IE/OOS/RS IDs) archived at test-records/tests_v1_legacy.yaml.
+# ID mapping: see PR description for old-ID → new-ID table.
 #
 # Assumptions: dataset contains PBMC-like genes (CD3D, MS4A1, NKG7, LYZ, …).
-# Tests marked WARN are best-effort; a must_contain miss records a warning, not a failure.
+# WARN cases: a must_contain miss records a warning, not a failure.
 
-version: "2.0"
+version: "3.0"
 description: "Regression tests for nvwa-mvp scRNA visualization MVP"
 
 tests:
 
-  # ── Happy path (6) ───────────────────────────────────────────────────────────
-  # Covers core read-path workflows that must always succeed.
+  # ── data_analysis — core operations (PASS) ──────────────────────────────────
+  # Agent calls a tool with valid inputs. Must always succeed.
+  # Includes paraphrases of standard requests (agent must recognize and route correctly).
 
-  - case_id: HP-01
-    category: happy_path
+  - case_id: DA-01
+    category: data_analysis
     prompt: "What's in this dataset? How many cells and genes does it have?"
     expected_status: PASS
     must_contain:
       - "cells"
       - "genes"
 
-  - case_id: HP-02
-    category: happy_path
+  - case_id: DA-02
+    category: data_analysis
     prompt: "Show me the UMAP colored by leiden cluster."
     expected_status: PASS
     must_contain:
@@ -43,12 +70,11 @@ tests:
     expected_artifact_count: 1
     requires_precomputed_umap: true
     notes: >
-      Requires the dataset to have X_umap in obsm and a leiden/louvain column in obs.
-      Fails immediately (pre-flight) if X_umap is absent — the test is not applicable
-      to raw datasets. Use a preprocessed h5ad (e.g. pbmc_test.h5ad).
+      Requires X_umap in obsm and a leiden/louvain column in obs.
+      Fails immediately (pre-flight) if X_umap absent — use a preprocessed h5ad.
 
-  - case_id: HP-03
-    category: happy_path
+  - case_id: DA-03
+    category: data_analysis
     prompt: "Show a violin plot for CD3D across all clusters."
     expected_status: PASS
     must_contain:
@@ -59,75 +85,110 @@ tests:
     requires_plot: true
     expected_artifact_count: 1
     notes: >
-      User explicitly requested a violin plot — only 1 artifact expected.
+      User explicitly named a plot type — only 1 artifact expected.
       A feature plot alongside it is an error (unsolicited output).
       Per C1 rule: generate only the specified plot type when user names one.
 
-  - case_id: HP-04
-    category: happy_path
+  - case_id: DA-04
+    category: data_analysis
     prompt: "Create a dotplot of the top 3 marker genes for each cluster."
     expected_status: PASS
     must_contain:
-      - "dot plot"  # agent writes "dot plot" (two words), not "dotplot"
+      - "dot plot"
     must_not_contain:
       - "preprocess"
     requires_plot: true
     expected_artifact_count: 1
     notes: >
-      Dataset-generic prompt — no hardcoded gene names. Agent discovers
-      marker genes from the dataset and plots them. Works on any preprocessed
-      dataset with clustering results.
+      Dataset-generic prompt — no hardcoded gene names. Agent discovers marker
+      genes from the dataset and plots them. Works on any preprocessed dataset
+      with clustering results.
 
-  - case_id: HP-05
-    category: happy_path
+  - case_id: DA-05
+    category: data_analysis
     prompt: "Run differential expression analysis for all clusters using Wilcoxon."
     expected_status: PASS
     must_contain:
       - "cluster"
     notes: >
       Requires a leiden/seurat clustering column in obs. Agent may ask for
-      clarification (marker vs pairwise) — that is acceptable. Artifact assertion
-      deferred until task-router architecture can distinguish analysis vs
-      conversation tasks and assert on tool_called + artifact directly.
+      clarification (marker vs pairwise) — that is acceptable.
 
-  - case_id: HP-06
-    category: happy_path
+  - case_id: DA-06
+    category: data_analysis
     prompt: "Summarize the QC metrics for this dataset."
     expected_status: PASS
     must_contain:
-      - "qc"      # agent always references QC in its response
+      - "qc"
     requires_table: true
     expected_artifact_count: 1
     notes: >
-      QC stats are returned as a TableResult artifact (CSV + display).
-      must_contain checks agent response text only — mean/median live in
-      the table, not the text response.
+      QC stats returned as TableResult (CSV + display). must_contain checks
+      agent response text only — mean/median live in the table, not the text.
 
-  # ── Input / data errors (6) ──────────────────────────────────────────────────
-  # The agent should produce a clear error message, not silently succeed.
+  - case_id: DA-07
+    category: data_analysis
+    prompt: >
+      Can you draw the expression levels of CD3D across the different
+      cell populations in this dataset?
+    expected_status: PASS
+    must_contain:
+      - "CD3D"
+    requires_plot: true
+    expected_artifact_count: 2
+    notes: >
+      Generic gene expression request with no plot type specified — both a
+      feature plot (spatial) and violin plot (by cell type) are expected.
+      Per C1 rule: when user does not specify a plot type, generate both.
+      Paraphrase of a supported request; previously miscategorized as out_of_scope.
 
-  - case_id: IE-01
-    category: input_error
+  - case_id: DA-08
+    category: data_analysis
+    prompt: >
+      I'd like to visualize how the cells are grouped in the low-dimensional
+      embedding space, colored by their cluster assignment.
+    expected_status: PASS
+    must_contain:
+      - "umap"
+    requires_plot: true
+    expected_artifact_count: 1
+    requires_precomputed_umap: true
+    notes: >
+      Paraphrase of a UMAP-by-cluster request. Agent must map this to
+      umap_plot and succeed. Requires preprocessed dataset (X_umap present).
+      Previously miscategorized as out_of_scope.
+
+  # ── data_analysis — invalid inputs (FAIL) ───────────────────────────────────
+  # Tool is identified correctly but inputs are bad or missing.
+  # Agent must report a clear error and stop — no silent substitution or crash.
+
+  - case_id: DA-09
+    category: data_analysis
     prompt: "Show a violin plot for FAKEGENE999."
     expected_status: FAIL
     must_contain:
-      - "not found"
+      - "not present"
     notes: >
-      Tests gene validation: FAKEGENE999 does not exist.
-      The agent must report the gene is missing (and ideally suggest alternatives).
+      Gene validation: FAKEGENE999 does not exist. Agent must report the gene
+      is missing (and ideally suggest alternatives). Agent uses "not present"
+      not "not found".
 
-  - case_id: IE-02
-    category: input_error
+  - case_id: DA-10
+    category: data_analysis
     prompt: "Color the UMAP by nonexistent_batch_col."
     expected_status: FAIL
-    must_contain:
-      - "not exist"  # agent says "does not exist", not "not found"
+    must_contain: []
+    must_not_contain:
+      - "successfully generated"
+      - "umap has been"
     notes: >
-      Tests obs-key validation: nonexistent_batch_col is not in adata.obs.
-      Expected: the agent lists available keys and refuses to plot.
+      obs-key validation: nonexistent_batch_col not in adata.obs.
+      Agent lists available columns and offers alternatives — does not use
+      a fixed phrase like "not exist". must_not_contain guards against
+      silent success instead.
 
-  - case_id: IE-03
-    category: input_error
+  - case_id: DA-11
+    category: data_analysis
     prompt: >
       Show a violin plot where the gene name is exactly "leiden".
       Do not choose any other gene. Do not substitute or auto-select genes.
@@ -137,111 +198,160 @@ tests:
     must_not_contain:
       - "successfully generated"
     notes: >
-      obs-field mistaken as gene: 'leiden'/'louvain' is a cluster label, not a gene.
-      The explicit phrasing forces the LLM to look up "leiden" as a gene name rather
-      than interpreting it as a groupby key, so the gene validator should fire and
-      return "not found". Without the explicit constraint the LLM auto-recovers by
-      picking real marker genes.
+      obs-field mistaken as gene: leiden is a cluster label, not a gene.
+      Explicit phrasing forces the LLM to look up "leiden" as a gene name
+      so the gene validator fires. Without the constraint the LLM auto-recovers
+      by picking real marker genes.
 
-  - case_id: IE-04
-    category: input_error
+  - case_id: DA-12
+    category: data_analysis
     prompt: >
       Show a scatter plot of n_genes versus total_counts
       colored by imaginary_condition_col. Do not fall back to any other
       color key if imaginary_condition_col is not available.
     expected_status: FAIL
     must_contain:
-      - "imaginary_condition_col"  # agent must at least acknowledge the bad key
+      - "imaginary_condition_col"
     must_not_contain:
       - "successfully generated"
     notes: >
-      Tests coloring-key validation on a scatter plot.
-      Previous runs showed the agent silently substituted louvain for the bad
-      key. The explicit "do not fall back" instruction and must_not_contain
-      guard together catch silent substitution.
+      Color-key validation on scatter plot. Previous runs showed agent silently
+      substituting louvain for the bad key. "Do not fall back" + must_not_contain
+      together catch silent substitution.
 
-  - case_id: IE-05
-    category: input_error
-    prompt: "Show a volcano plot for cluster 0."
-    expected_status: WARN
-    must_contain: []
-    notes: >
-      Volcano plot requires rank_genes_groups in adata.uns.
-      pbmc_test.h5ad already contains pre-computed DE results, so the agent
-      will succeed rather than error. Demoted to WARN so the suite does not
-      fail on this dataset. To test the true error path, use a raw h5ad that
-      has no rank_genes_groups in uns.
-
-  - case_id: IE-06
-    category: input_error
+  - case_id: DA-13
+    category: data_analysis
     prompt: "Run differential expression for cluster 999 versus all other cells."
     expected_status: FAIL
-    must_contain: []
     must_not_contain:
       - "analysis complete"
       - "successfully ran"
       - "top genes"
     notes: >
-      Tests invalid cluster ID: cluster 999 does not exist in any real dataset.
-      The agent must not silently succeed — we check it did not produce DE results
-      rather than asserting specific error phrasing (which varies by run).
+      Invalid cluster ID: cluster 999 does not exist. Agent must not silently
+      succeed — we check it did not produce DE results rather than asserting
+      specific error phrasing (which varies by run).
 
-  # ── Resource / scale (4) ────────────────────────────────────────────────────
-  # Best-effort checks; a must_contain miss records a WARN, not a FAIL.
-
-  - case_id: RS-01
-    category: resource_scale
-    prompt: >
-      Show a dotplot for CD3D, MS4A1, NKG7, LYZ, CD8A, CD4, FOXP3,
-      IL2, TNF, IFNG grouped by leiden.
-    expected_status: WARN
-    must_contain:
-      - "dot plot"  # agent writes "dot plot" (two words)
-    requires_plot: true
-    expected_artifact_count: 1
+  - case_id: DA-14
+    category: data_analysis
+    prompt: "Can you show me the ribosomal RNA percentage per cell?"
+    expected_status: FAIL
+    must_contain: []
+    must_not_contain:
+      - "successfully generated"
+      - "violin plot"
     notes: >
-      Exercises a 10-gene panel. Primarily a smoke-test for large gene lists;
-      a partial match (some genes not found) is still acceptable for WARN.
+      Ribosomal RNA percentage (pct_counts_rb) is not a standard QC metric
+      in most h5ad files. Prompt is explicit about QC metric to avoid the
+      agent interpreting it as a gene expression query (RPL/RPS genes).
+      Agent must report the column is missing. Must not produce a plot.
+      Source: Yalu NC-A1.
 
-  - case_id: RS-02
-    category: resource_scale
-    prompt: "How many cells are in each leiden cluster?"
-    expected_status: WARN
-    must_contain:
-      - "cluster"
+  - case_id: DA-15
+    category: data_analysis
+    prompt: "Show me the expression of CD3"
+    expected_status: FAIL
+    must_contain: []
+    must_not_contain:
+      - "successfully generated"
     notes: >
-      Tests cluster-level aggregation. Should complete well within time limits
-      even for datasets with >10k cells.
+      CD3 is a protein complex encoding multiple genes (CD3E, CD3D, CD3G).
+      Agent should recognize the ambiguity and ask which gene to visualize.
+      Must not silently pick one gene and plot. Hard to assert specific
+      clarification wording — must_not_contain guards against silent success.
+      Source: Yalu NC-C2.
 
-  - case_id: RS-03
-    category: resource_scale
-    prompt: >
-      First tell me how many cells are in this dataset, then show the top
-      5 marker genes for each cluster, and finally display a heatmap of those
-      markers.
-    expected_status: WARN
+  - case_id: DA-16
+    category: data_analysis
+    prompt: "Find DE genes in Ghost_Cell_Type between disease and normal"
+    expected_status: FAIL
     must_contain:
-      - "cells"
+      - "Ghost_Cell_Type"
+    must_not_contain:
+      - "analysis complete"
+      - "differentially expressed"
     notes: >
-      Multi-step compound query. The agent may use multiple tool calls in a
-      single turn. WARN because not all steps may complete for every dataset.
+      Ghost_Cell_Type does not exist in cell_type annotation. Agent must
+      validate the cell type before running and report which input failed.
+      Must not loop or produce results using the wrong cell type.
+      Source: Yalu NC-D1.
 
-  - case_id: RS-04
-    category: resource_scale
-    prompt: "Show a heatmap of the top 5 marker genes for each cluster."
-    expected_status: WARN
+  - case_id: DA-17
+    category: data_analysis
+    prompt: "Compare Early cardiomyocyte in FakeCondition vs Control"
+    expected_status: FAIL
     must_contain:
-      - "heatmap"
-    requires_plot: true
-    expected_artifact_count: 1
+      - "FakeCondition"
+    must_not_contain:
+      - "analysis complete"
+      - "differentially expressed"
     notes: >
-      Tests the heatmap tool, which has no other coverage in the suite.
-      If rank_genes_groups is pre-computed the agent plots directly; otherwise
-      it runs DE first then heatmap. WARN because dataset-dependent (some datasets
-      may lack enough clusters or markers for a clean heatmap).
+      FakeCondition does not exist in the dataset. All three inputs (cell type,
+      condition A, condition B) must be validated independently. Agent must
+      report which specific input failed. Must not run DE on partial valid inputs.
+      Source: Yalu NC-D2.
 
-  # ── Out-of-scope + paraphrase (4) ────────────────────────────────────────────
-  # Two genuine refusals; two paraphrases of supported requests that must succeed.
+  # ── interpretation ───────────────────────────────────────────────────────────
+  # Agent answers a biological question from general knowledge — no tool call.
+  # PASS requires a general-knowledge disclaimer in the response.
+  # FAIL = agent answered confidently without a disclaimer (silent hallucination risk).
+
+  - case_id: INT-01
+    category: interpretation
+    prompt: "Is this a healthy dataset?"
+    expected_status: PASS
+    expected_artifact_count: 0
+    notes: >
+      KNOWN FAIL — deferred pending T-013 (router wired into core.py).
+      Root cause: query is genuinely ambiguous — "Is this a healthy dataset?" can
+      legitimately be read as a QC request OR a general biology question. Model maps
+      it to QC/Overview intent and calls summarize_qc_metrics before reaching the
+      Interpretation rule. Two prompt patches attempted (Interpretation entry in Fast
+      Track, carve-out in PROBE-FIRST rule) — neither held. Correct fix is a code-level
+      gate in core.py that routes Layer 2b queries away from tool execution. Revisit
+      after T-013.
+
+  - case_id: INT-02
+    category: interpretation
+    prompt: "What does high mitochondrial percentage typically indicate in scRNA-seq data?"
+    expected_status: PASS
+    expected_artifact_count: 0
+    notes: >
+      Unambiguous general biology question — no reasonable interpretation calls for
+      running a tool. Unlike INT-01, this cannot be misconstrued as a data analysis
+      request. Agent must answer from biological knowledge and include a disclaimer.
+      PASS example: "This is based on general biological knowledge, not an analysis
+      of your specific dataset."
+      FAIL = model called a tool or answered without a disclaimer.
+      Diagnostic value: if INT-02 passes and INT-01 fails, INT-01 is confirmed as an
+      ambiguity edge case requiring T-013 (router), not a fundamental behavior gap.
+
+  # ── artifact_interaction ─────────────────────────────────────────────────────
+  # Agent references or acts on a prior session output (plot, table, export result).
+  # No memory system exists — artifact pointers are always unresolvable in a fresh session.
+  # PASS = agent asks for clarification; does not falsely claim success or flatly refuse.
+
+  - case_id: ART-01
+    category: artifact_interaction
+    prompt: "Make the last plot bigger"
+    expected_status: PASS
+    must_contain: []
+    must_not_contain:
+      - "successfully resized"
+      - "made it bigger"
+      - "enlarged"
+      - "plot is now larger"
+    notes: >
+      Covers the general class of artifact interaction prompts (modify color,
+      resize, export prior result, etc.). No memory system exists — "the last
+      plot" is an unresolvable pointer in a fresh session. Correct behavior:
+      agent asks the user which plot or what analysis they are referring to.
+      PASS = agent clarifies without claiming false success.
+      FAIL = agent claims to have resized something, or flatly refuses with no guidance.
+      Promote to multi-case suite when session memory is implemented.
+
+  # ── out_of_scope ─────────────────────────────────────────────────────────────
+  # Features not in V1.0 scope. Agent must decline without crashing.
 
   - case_id: OOS-01
     category: out_of_scope
@@ -250,14 +360,14 @@ tests:
       perform batch correction using Harmony.
     expected_status: FAIL
     must_contain:
-      - "don't"  # agent uses contraction; "not" is not a substring of "don't"
+      - "don't"
     must_not_contain:
       - "integration complete"
       - "harmony applied"
       - "batch correction done"
     notes: >
-      Dataset integration / batch correction is outside the agent's scope.
-      The agent should politely decline and redirect to supported analyses.
+      Dataset integration / batch correction is out of scope. Agent should
+      politely decline and redirect to supported analyses.
 
   - case_id: OOS-02
     category: out_of_scope
@@ -271,39 +381,61 @@ tests:
       - "velocity arrows"
       - "paga complete"
     notes: >
-      Trajectory analysis and RNA velocity are out of scope.
-      The agent should decline without crashing. On a raw dataset it may redirect
-      to preprocessing rather than explicitly saying "not supported" — so we only
-      check that it did NOT actually perform the analysis (must_not_contain), not
-      the specific wording of the refusal.
+      Trajectory analysis and RNA velocity are out of scope. Agent should
+      decline without crashing. On a raw dataset it may redirect to
+      preprocessing rather than explicitly saying "not supported" — so we only
+      check it did NOT perform the analysis, not the specific refusal wording.
 
-  - case_id: OOS-03
-    category: out_of_scope
-    prompt: >
-      Can you draw the expression levels of CD3D across the different
-      cell populations in this dataset?
-    expected_status: PASS
-    must_contain:
-      - "CD3D"
-    requires_plot: true
-    expected_artifact_count: 2
-    notes: >
-      Generic gene expression request with no plot type specified — both a
-      feature plot (spatial) and violin plot (by cell type) are expected.
-      Per C1 rule: when user does not specify a plot type, generate both.
-      This was previously flagged as a bug; it is now confirmed correct behavior.
+  # ── resource_scale ───────────────────────────────────────────────────────────
+  # Large, compound, or multi-step requests. Always WARN (best-effort).
+  # A must_contain miss records a warning, not a failure.
 
-  - case_id: OOS-04
-    category: out_of_scope
+  - case_id: RS-01
+    category: resource_scale
     prompt: >
-      I'd like to visualize how the cells are grouped in the low-dimensional
-      embedding space, colored by their cluster assignment.
-    expected_status: PASS
+      Show a dotplot for CD3D, MS4A1, NKG7, LYZ, CD8A, CD4, FOXP3,
+      IL2, TNF, IFNG grouped by leiden.
+    expected_status: WARN
     must_contain:
-      - "umap"
+      - "dot plot"
     requires_plot: true
     expected_artifact_count: 1
-    requires_precomputed_umap: true
     notes: >
-      Paraphrase of a UMAP-by-cluster request. The agent should map this to
-      the umap_plot tool and succeed. Requires preprocessed dataset (X_umap present).
+      10-gene panel smoke-test. Partial match (some genes not found) is
+      acceptable for WARN.
+
+  - case_id: RS-02
+    category: resource_scale
+    prompt: "How many cells are in each leiden cluster?"
+    expected_status: WARN
+    must_contain:
+      - "cluster"
+    notes: >
+      Cluster-level aggregation. Should complete within time limits even for
+      datasets with >10k cells.
+
+  - case_id: RS-03
+    category: resource_scale
+    prompt: >
+      First tell me how many cells are in this dataset, then show the top
+      5 marker genes for each cluster, and finally display a heatmap of those
+      markers.
+    expected_status: WARN
+    must_contain:
+      - "cells"
+    notes: >
+      Multi-step compound query. Agent may use multiple tool calls in one turn.
+      WARN because not all steps may complete for every dataset.
+
+  - case_id: RS-04
+    category: resource_scale
+    prompt: "Show a heatmap of the top 5 marker genes for each cluster."
+    expected_status: WARN
+    must_contain:
+      - "heatmap"
+    requires_plot: true
+    expected_artifact_count: 1
+    notes: >
+      Tests the heatmap tool, which has no other coverage in the suite.
+      If rank_genes_groups is pre-computed the agent plots directly; otherwise
+      it runs DE first then heatmap. WARN because dataset-dependent.

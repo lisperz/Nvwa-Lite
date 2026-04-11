@@ -74,7 +74,7 @@ def cross_tabulate_metadata(
     )
 
     # Perform cross-tabulation
-    crosstab = adata.obs.groupby([row_key, col_key]).size().unstack(fill_value=0)
+    crosstab = adata.obs.groupby([row_key, col_key], observed=True).size().unstack(fill_value=0)
 
     if normalize:
         # Convert to percentages per row
