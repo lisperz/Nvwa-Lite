@@ -95,8 +95,15 @@ def get_session_manager():
         session_timeout_minutes=timeout_mins,
     )
 
+@st.cache_resource
+def start_cleanup_server_once():
+    """Start cleanup HTTP server for sendBeacon (runs once per app lifecycle)."""
+    from src.session.cleanup_server import start_cleanup_server
+    start_cleanup_server(session_manager=get_session_manager(), auth_service=get_auth_service(), port=8503)
+
 auth_service = get_auth_service()
 session_manager = get_session_manager()
+start_cleanup_server_once()  # Start background cleanup endpoint
 
 # Check authentication
 if "user" not in st.session_state:
@@ -159,6 +166,65 @@ if "session_id" not in st.session_state:
     import uuid
     st.session_state.session_id = str(uuid.uuid4())
 
+# ---------------------------------------------------------------------------
+# Session cleanup bridge (JS → Python)
+# ---------------------------------------------------------------------------
+# Phase 1: On page load, JS reads the old session_id from sessionStorage and
+# writes it to a short-lived cookie so Python can end it synchronously before
+# creating a new session. This handles the refresh case immediately.
+#
+# Phase 2: JS registers pagehide/beforeunload to sendBeacon to the cleanup
+# endpoint, handling tab close and navigate-away.
+#
+# Note: st.components.v1.html() is one-way (Python→JS only). The cookie is
+# the return channel. Token is embedded in the page — acceptable for pilot
+# since the user is already authenticated and it's their own token.
+
+_current_token = st.session_state.get("token", "")
+_current_sid = st.session_state.session_id
+
+st.components.v1.html(f"""
+<script>
+(function() {{
+  var OLD_SID_KEY = "nvwa_session_id";
+  var CLEANUP_URL = "/api/cleanup";
+
+  // --- Phase 1: cookie bridge for refresh ---
+  var oldSid = sessionStorage.getItem(OLD_SID_KEY);
+  if (oldSid && oldSid !== "{_current_sid}") {{
+    // Write old session_id to a short-lived cookie so Python can read it
+    document.cookie = "nvwa_old_session=" + encodeURIComponent(oldSid) + ";path=/;max-age=10;SameSite=Strict";
+  }}
+
+  // Update sessionStorage with the current session_id
+  sessionStorage.setItem(OLD_SID_KEY, "{_current_sid}");
+
+  // --- Phase 2: sendBeacon for tab close / navigate away ---
+  var beaconSent = false;
+  function sendCleanup() {{
+    if (beaconSent) return;
+    beaconSent = true;
+    var payload = JSON.stringify({{session_id: "{_current_sid}", token: "{_current_token}"}});
+    navigator.sendBeacon(CLEANUP_URL, new Blob([payload], {{type: "application/json"}}));
+  }}
+
+  // pagehide is the modern, reliable event (Chrome/Safari/Edge/Firefox + mobile)
+  window.addEventListener("pagehide", sendCleanup);
+  // beforeunload as belt-and-suspenders for desktop browsers
+  window.addEventListener("beforeunload", sendCleanup);
+}})();
+</script>
+""", height=0)
+
+# ---------------------------------------------------------------------------
+# Cookie bridge: end old session from previous page load (refresh recovery)
+# ---------------------------------------------------------------------------
+_old_sid = st.context.cookies.get("nvwa_old_session")
+if _old_sid and _old_sid != st.session_state.session_id:
+    logger.info("Refresh detected: ending old session %s for user %s", _old_sid, user.user_id)
+    session_manager.end_session(_old_sid)
+
+
 uploaded_path, s3_key = file_upload_widget(user.user_id, st.session_state.session_id)
 
 
@@ -200,7 +266,17 @@ if need_reload:
     )
 
     if session is None:
-        st.error("Unable to create session. You may have an active session or the system is at capacity. Please try again later.")
+        user_count = session_manager._get_user_session_count(user.user_id)
+        if user_count >= session_manager.max_sessions_per_user:
+            st.error(
+                f"You already have {user_count} active session(s). "
+                f"Please close another session or wait for it to time out (~30 min)."
+            )
+        else:
+            st.error(
+                "The system is currently at full capacity. "
+                "Please wait a moment and try again."
+            )
         st.stop()
 
     st.session_state.adata = adata
@@ -219,6 +295,17 @@ ds_state = st.session_state.ds_state
 
 pipeline_panel(ds_state)
 example_queries()
+
+# ---------------------------------------------------------------------------
+# Heartbeat (fallback only — runs if sendBeacon fails)
+# ---------------------------------------------------------------------------
+@st.fragment(run_every=15)
+def _session_heartbeat():
+    """Update last_activity every 15s. Fallback for when sendBeacon fails."""
+    if "session_id" in st.session_state:
+        session_manager.heartbeat(st.session_state.session_id)
+
+_session_heartbeat()  # Start the heartbeat fragment
 
 
 def _on_adata_replaced(new_adata) -> None:
