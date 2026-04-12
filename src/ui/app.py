@@ -189,7 +189,15 @@ if uploaded_path is None:
     st.stop()
 
 if need_reload:
-    adata = load_uploaded(str(uploaded_path))
+    try:
+        adata = load_uploaded(str(uploaded_path))
+    except Exception:
+        logger.exception("Failed to load uploaded file: %s", uploaded_path.name)
+        st.error(
+            f"Could not read **{uploaded_path.name}**. The file may be corrupt or "
+            "not a valid `.h5ad` (AnnData) file. Please upload a different file."
+        )
+        st.stop()
     ds_state = detect_dataset_state(adata, source="upload", filename=uploaded_path.name)
 
     # Try to create session (respects concurrency limits)
