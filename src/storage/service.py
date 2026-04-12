@@ -7,12 +7,11 @@ Implements per-user namespace isolation and TTL-based cleanup.
 from __future__ import annotations
 
 import os
-from datetime import datetime, timedelta
 from pathlib import Path
-from typing import BinaryIO
 
 try:
     import boto3
+    from botocore.config import Config
     from botocore.exceptions import ClientError
     BOTO3_AVAILABLE = True
 except ImportError:
@@ -43,7 +42,11 @@ class S3StorageService:
             raise ValueError("S3_BUCKET_NAME must be set in environment or passed to constructor")
 
         self.region = region
-        self.s3_client = boto3.client("s3", region_name=region)
+        self.s3_client = boto3.client(
+            "s3",
+            region_name=region,
+            config=Config(s3={"addressing_style": "virtual"}),
+        )
 
     def generate_upload_url(
         self,
@@ -184,6 +187,138 @@ class S3StorageService:
         except ClientError as e:
             raise RuntimeError(f"Failed to download file: {e}")
 
+    def download_file_to_path(self, key: str, dest: Path) -> None:
+        """Download a file from S3 directly to a local path (streaming, low memory).
+
+        Args:
+            key: S3 object key.
+            dest: Local destination path.
+        """
+        try:
+            self.s3_client.download_file(self.bucket_name, key, str(dest))
+        except ClientError as e:
+            raise RuntimeError(f"Failed to download file to path: {e}")
+
+    def initiate_multipart_upload(
+        self,
+        user_id: str,
+        session_id: str,
+        filename: str,
+    ) -> tuple[str, str]:
+        """Start a multipart upload session.
+
+        Args:
+            user_id: User identifier.
+            session_id: Session identifier.
+            filename: Original filename.
+
+        Returns:
+            Tuple of (upload_id, s3_key).
+        """
+        key = f"users/{user_id}/sessions/{session_id}/uploads/{filename}"
+        try:
+            response = self.s3_client.create_multipart_upload(
+                Bucket=self.bucket_name,
+                Key=key,
+                ContentType="application/octet-stream",
+            )
+            return response["UploadId"], key
+        except ClientError as e:
+            raise RuntimeError(f"Failed to initiate multipart upload: {e}")
+
+    def generate_part_upload_url(
+        self,
+        s3_key: str,
+        upload_id: str,
+        part_number: int,
+        expires_in: int = 7200,
+    ) -> str:
+        """Generate a presigned URL for uploading one part.
+
+        Args:
+            s3_key: S3 object key.
+            upload_id: Multipart upload ID.
+            part_number: Part number (1-indexed).
+            expires_in: URL expiration in seconds (default 2 hours).
+
+        Returns:
+            Presigned URL string.
+        """
+        try:
+            return self.s3_client.generate_presigned_url(
+                "upload_part",
+                Params={
+                    "Bucket": self.bucket_name,
+                    "Key": s3_key,
+                    "UploadId": upload_id,
+                    "PartNumber": part_number,
+                },
+                ExpiresIn=expires_in,
+            )
+        except ClientError as e:
+            raise RuntimeError(f"Failed to generate part upload URL: {e}")
+
+    def complete_multipart_upload(
+        self,
+        s3_key: str,
+        upload_id: str,
+        parts: list[dict],
+    ) -> None:
+        """Complete a multipart upload.
+
+        Args:
+            s3_key: S3 object key.
+            upload_id: Multipart upload ID.
+            parts: List of {"PartNumber": int, "ETag": str} dicts.
+        """
+        try:
+            self.s3_client.complete_multipart_upload(
+                Bucket=self.bucket_name,
+                Key=s3_key,
+                UploadId=upload_id,
+                MultipartUpload={"Parts": parts},
+            )
+        except ClientError as e:
+            raise RuntimeError(f"Failed to complete multipart upload: {e}")
+
+    def abort_multipart_upload(self, s3_key: str, upload_id: str) -> None:
+        """Abort and clean up a multipart upload.
+
+        Args:
+            s3_key: S3 object key.
+            upload_id: Multipart upload ID.
+        """
+        try:
+            self.s3_client.abort_multipart_upload(
+                Bucket=self.bucket_name,
+                Key=s3_key,
+                UploadId=upload_id,
+            )
+        except ClientError as e:
+            raise RuntimeError(f"Failed to abort multipart upload: {e}")
+
+    def configure_cors(self, allowed_origins: list[str]) -> None:
+        """Set CORS policy on the bucket for browser-direct uploads.
+
+        Args:
+            allowed_origins: List of allowed origins (e.g. ["https://nvwa.bio"]).
+        """
+        try:
+            self.s3_client.put_bucket_cors(
+                Bucket=self.bucket_name,
+                CORSConfiguration={
+                    "CORSRules": [{
+                        "AllowedOrigins": allowed_origins,
+                        "AllowedMethods": ["PUT"],
+                        "AllowedHeaders": ["Content-Type", "Content-Length"],
+                        "ExposeHeaders": ["ETag"],
+                        "MaxAgeSeconds": 3600,
+                    }]
+                },
+            )
+        except ClientError as e:
+            raise RuntimeError(f"Failed to configure CORS: {e}")
+
     def set_lifecycle_policy(self, days: int = 14) -> None:
         """Set TTL for automatic deletion of old data.
 
@@ -229,6 +364,51 @@ class S3StorageService:
             ".log": "text/plain",
         }
         return content_types.get(ext, "application/octet-stream")
+
+
+def prepare_multipart_upload(
+    s3_service: S3StorageService,
+    user_id: str,
+    session_id: str,
+    filename: str,
+    file_size: int,
+    chunk_size: int = 5 * 1024 * 1024,
+) -> dict:
+    """Pre-generate all presigned part URLs for a multipart upload.
+
+    For a 1GB file with 5MB chunks, this generates ~200 URLs (~100KB payload).
+    All URLs are generated upfront and returned to the JS component in one round-trip.
+
+    Args:
+        s3_service: Initialized S3StorageService instance.
+        user_id: User identifier.
+        session_id: Session identifier.
+        filename: Original filename.
+        file_size: File size in bytes.
+        chunk_size: Size of each chunk in bytes (min 5MB for S3 multipart).
+
+    Returns:
+        Dict with upload_id, s3_key, chunk_size, and list of {part_number, url}.
+    """
+    import math
+
+    upload_id, s3_key = s3_service.initiate_multipart_upload(user_id, session_id, filename)
+    num_parts = math.ceil(file_size / chunk_size)
+
+    part_urls = [
+        {
+            "part_number": i + 1,
+            "url": s3_service.generate_part_upload_url(s3_key, upload_id, i + 1),
+        }
+        for i in range(num_parts)
+    ]
+
+    return {
+        "upload_id": upload_id,
+        "s3_key": s3_key,
+        "chunk_size": chunk_size,
+        "part_urls": part_urls,
+    }
 
 
 class LocalStorageService:

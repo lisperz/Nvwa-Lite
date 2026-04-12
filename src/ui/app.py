@@ -159,7 +159,10 @@ if "session_id" not in st.session_state:
     import uuid
     st.session_state.session_id = str(uuid.uuid4())
 
-uploaded_path, s3_key = file_upload_widget(user.user_id, st.session_state.session_id)
+uploaded_path, s3_key, temp_path = file_upload_widget(user.user_id, st.session_state.session_id)
+
+# Resolve the effective load path: temp_path (direct S3) or uploaded_path (proxy)
+load_path = temp_path or uploaded_path
 
 
 # ---------------------------------------------------------------------------
@@ -176,7 +179,7 @@ def load_uploaded(path: str):
 
 
 # Track current dataset source to detect changes
-current_filename = uploaded_path.name if uploaded_path else ""
+current_filename = load_path.name if load_path else ""
 
 # Check if we need to reload (new file uploaded)
 need_reload = (
@@ -184,19 +187,19 @@ need_reload = (
     or st.session_state.get("_dataset_filename") != current_filename
 )
 
-if uploaded_path is None:
+if load_path is None:
     st.info("Please upload a .h5ad file in the sidebar to get started.")
     st.stop()
 
 if need_reload:
-    adata = load_uploaded(str(uploaded_path))
-    ds_state = detect_dataset_state(adata, source="upload", filename=uploaded_path.name)
+    adata = load_uploaded(str(load_path))
+    ds_state = detect_dataset_state(adata, source="upload", filename=load_path.name)
 
     # Try to create session (respects concurrency limits)
     session = session_manager.create_session(
         user_id=user.user_id,
         session_id=st.session_state.session_id,
-        dataset_s3_key=s3_key or f"users/{user.user_id}/sessions/{st.session_state.session_id}/uploads/{uploaded_path.name}"
+        dataset_s3_key=s3_key or f"users/{user.user_id}/sessions/{st.session_state.session_id}/uploads/{load_path.name}"
     )
 
     if session is None:
