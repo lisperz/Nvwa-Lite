@@ -117,8 +117,8 @@ def _valid_table(t: Any) -> bool:
 
 def load_adata(dataset_path: Path) -> Any:
     """Load and return an AnnData, suppressing legacy format warnings."""
-    import anndata as ad
-    return ad.read_h5ad(dataset_path)
+    from src.analysis.h5ad_loader import load_h5ad
+    return load_h5ad(dataset_path)
 
 
 # ── Single-test runner ─────────────────────────────────────────────────────────
@@ -484,8 +484,8 @@ def main() -> int:
 
         # Pre-flight: dataset capability checks (cheap, no agent invocation).
         if tc.get("requires_precomputed_umap"):
-            import anndata as _ad
-            _adata_check = _ad.read_h5ad(dataset_path)
+            from src.analysis.h5ad_loader import load_h5ad as _load_h5ad
+            _adata_check = _load_h5ad(dataset_path)
             if "X_umap" not in _adata_check.obsm:
                 result.status = "fail"
                 result.failures = [

@@ -17,10 +17,10 @@ _PROJECT_ROOT = str(Path(__file__).resolve().parent.parent.parent)
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
-import anndata as ad
 import streamlit as st
 
 from src.agent.core import create_agent
+from src.analysis.h5ad_loader import load_h5ad
 from src.agent.tools import clear_plot_results, clear_table_results, get_plot_results, get_table_results, set_adata_replaced_callback, set_plot_generated_callback
 from src.agent.viz_state import VisualizationState, get_viz_state
 from src.auth.service import AuthService
@@ -170,7 +170,7 @@ uploaded_path, s3_key = file_upload_widget(user.user_id, st.session_state.sessio
 def load_uploaded(path: str):
     """Load and cache an uploaded .h5ad file."""
     logger.info("Loading uploaded file: %s", path)
-    adata = ad.read_h5ad(path)
+    adata = load_h5ad(path)
     logger.info("Uploaded loaded: %d cells, %d genes", adata.n_obs, adata.n_vars)
     return adata
 

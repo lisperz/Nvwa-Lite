@@ -204,12 +204,12 @@ def adata():
 
     Session-scoped so the h5ad file is read only once across all test files.
     """
-    import anndata as ad
+    from src.analysis.h5ad_loader import load_h5ad
 
     if not DATASET_PATH.exists():
         pytest.skip(f"Dataset not found: {DATASET_PATH}")
 
-    raw = ad.read_h5ad(DATASET_PATH)
+    raw = load_h5ad(DATASET_PATH)
     return _prepare_adata(raw)
 
 
