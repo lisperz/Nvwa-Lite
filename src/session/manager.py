@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
@@ -24,6 +25,8 @@ try:
     REDIS_AVAILABLE = True
 except ImportError:
     REDIS_AVAILABLE = False
+
+logger = logging.getLogger(__name__)
 
 
 class SessionStatus(Enum):
@@ -95,6 +98,9 @@ class SessionManager:
             self._memory_sessions: dict[str, dict] = {}
             self._memory_user_sessions: dict[str, set[str]] = {}
 
+        # Reentrant lock — cleanup endpoint thread + main Streamlit thread both call end_session
+        self._lock = threading.RLock()
+
     def create_session(
         self,
         user_id: str,
@@ -117,31 +123,35 @@ class SessionManager:
         Returns:
             Session object if created, None if limits exceeded.
         """
-        # Clean orphaned user session entries (BUG #22 fix)
-        self._cleanup_expired_user_sessions(user_id, current_session_id=session_id)
+        with self._lock:
+            # Clean orphaned user session entries (BUG #22 fix)
+            self._cleanup_expired_user_sessions(user_id, current_session_id=session_id)
 
-        # Check user's active sessions (after cleanup)
-        user_session_count = self._get_user_session_count(user_id)
-        if user_session_count >= self.max_sessions_per_user:
-            return None  # User at session limit
+            # Clean stale sessions (heartbeat fallback — last_activity > 45s)
+            self._cleanup_stale_sessions(user_id)
 
-        # Check system-wide concurrency (derived from live keys — BUG #21 fix)
-        active_count = self._get_active_count()
-        if active_count >= self.max_concurrent_sessions:
-            return None  # System at capacity
+            # Check user's active sessions (after cleanup)
+            user_session_count = self._get_user_session_count(user_id)
+            if user_session_count >= self.max_sessions_per_user:
+                return None  # User at session limit
 
-        # Create session
-        session = Session(
-            session_id=session_id,
-            user_id=user_id,
-            dataset_s3_key=dataset_s3_key,
-            status=SessionStatus.ACTIVE,
-            created_at=datetime.utcnow(),
-            last_activity=datetime.utcnow(),
-        )
+            # Check system-wide concurrency (derived from live keys — BUG #21 fix)
+            active_count = self._get_active_count()
+            if active_count >= self.max_concurrent_sessions:
+                return None  # System at capacity
 
-        self._store_session(session)
-        return session
+            # Create session
+            session = Session(
+                session_id=session_id,
+                user_id=user_id,
+                dataset_s3_key=dataset_s3_key,
+                status=SessionStatus.ACTIVE,
+                created_at=datetime.utcnow(),
+                last_activity=datetime.utcnow(),
+            )
+
+            self._store_session(session)
+            return session
 
     def get_session(self, session_id: str) -> Session | None:
         """Get session by ID.
@@ -217,28 +227,94 @@ class SessionManager:
         Args:
             session_id: Session identifier.
         """
-        session = self.get_session(session_id)
-        if not session:
-            return
+        with self._lock:
+            session = self.get_session(session_id)
+            if not session:
+                return
+
+            if self.redis:
+                session_key = f"session:{session_id}"
+                user_sessions_key = f"user:{session.user_id}:sessions"
+
+                # Remove from user's sessions
+                self.redis.srem(user_sessions_key, session_id)
+
+                # Mark as completed
+                self.redis.hset(session_key, "status", SessionStatus.COMPLETED.value)
+
+                # Keep for 24 hours for analytics
+                self.redis.expire(session_key, 86400)
+            else:
+                if session_id in self._memory_sessions:
+                    self._memory_sessions[session_id]["status"] = SessionStatus.COMPLETED.value
+                    user_id = self._memory_sessions[session_id]["user_id"]
+                    if user_id in self._memory_user_sessions:
+                        self._memory_user_sessions[user_id].discard(session_id)
+
+    def heartbeat(self, session_id: str) -> None:
+        """Update last_activity for a session (heartbeat fallback).
+
+        Called every ~15s by the Streamlit fragment. If the tab dies and
+        sendBeacon fails, _cleanup_stale_sessions will end this session
+        when last_activity is older than 45 seconds.
+
+        Args:
+            session_id: Session identifier.
+        """
+        with self._lock:
+            if self.redis:
+                session_key = f"session:{session_id}"
+                if self.redis.exists(session_key):
+                    self.redis.hset(session_key, "last_activity", datetime.utcnow().isoformat())
+            else:
+                if session_id in self._memory_sessions:
+                    self._memory_sessions[session_id]["last_activity"] = datetime.utcnow().isoformat()
+
+    def _cleanup_stale_sessions(self, user_id: str) -> None:
+        """End ACTIVE sessions with no heartbeat for > 45 seconds (fallback only).
+
+        Called inside create_session() before limit checks. Only fires when
+        sendBeacon cleanup failed — e.g. browser crash or network drop.
+        Never evicts sessions that are still receiving heartbeats.
+
+        Args:
+            user_id: User whose stale sessions to clean.
+        """
+        stale_threshold = datetime.utcnow() - timedelta(seconds=45)
 
         if self.redis:
-            session_key = f"session:{session_id}"
-            user_sessions_key = f"user:{session.user_id}:sessions"
-
-            # Remove from user's sessions
-            self.redis.srem(user_sessions_key, session_id)
-
-            # Mark as completed
-            self.redis.hset(session_key, "status", SessionStatus.COMPLETED.value)
-
-            # Keep for 24 hours for analytics
-            self.redis.expire(session_key, 86400)
+            user_sessions_key = f"user:{user_id}:sessions"
+            session_ids = self.redis.smembers(user_sessions_key)
+            for sid in session_ids:
+                data = self.redis.hgetall(f"session:{sid}")
+                if not data:
+                    continue
+                if data.get("status") != SessionStatus.ACTIVE.value:
+                    continue
+                last_activity_str = data.get("last_activity")
+                if last_activity_str:
+                    try:
+                        last_activity = datetime.fromisoformat(last_activity_str)
+                        if last_activity < stale_threshold:
+                            logger.info("Cleaning stale session %s (last_activity=%s)", sid, last_activity_str)
+                            self.end_session(sid)
+                    except ValueError:
+                        pass
         else:
-            if session_id in self._memory_sessions:
-                self._memory_sessions[session_id]["status"] = SessionStatus.COMPLETED.value
-                user_id = self._memory_sessions[session_id]["user_id"]
-                if user_id in self._memory_user_sessions:
-                    self._memory_user_sessions[user_id].discard(session_id)
+            for sid, data in list(self._memory_sessions.items()):
+                if data.get("user_id") != user_id:
+                    continue
+                if data.get("status") != SessionStatus.ACTIVE.value:
+                    continue
+                last_activity_str = data.get("last_activity")
+                if last_activity_str:
+                    try:
+                        last_activity = datetime.fromisoformat(last_activity_str)
+                        if last_activity < stale_threshold:
+                            logger.info("Cleaning stale session %s (last_activity=%s)", sid, last_activity_str)
+                            self.end_session(sid)
+                    except ValueError:
+                        pass
 
     def get_queue_position(self, user_id: str) -> int | None:
         """Get user's position in the queue (if waiting).

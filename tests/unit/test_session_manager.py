@@ -7,6 +7,7 @@ Note: These tests use the in-memory fallback (no Redis). The bugs are Redis-spec
 For Redis-specific behavior, manual testing or integration tests are required.
 """
 
+import time
 import pytest
 from src.session.manager import SessionManager, SessionStatus
 
@@ -159,5 +160,102 @@ class TestSessionStatus:
         """Ending a nonexistent session is safe (no-op)."""
         mgr = SessionManager(redis_client=None)
         mgr.end_session("nonexistent")
+        assert mgr._get_active_count() == 0
+
+
+class TestHeartbeat:
+    """Test heartbeat updates last_activity (fallback mechanism)."""
+
+    def test_heartbeat_updates_last_activity(self):
+        """Heartbeat should update last_activity timestamp."""
+        mgr = SessionManager(redis_client=None)
+        mgr.create_session("user1", "sid1", "s3://bucket/file.h5ad")
+        initial = mgr._memory_sessions["sid1"]["last_activity"]
+        time.sleep(0.01)
+        mgr.heartbeat("sid1")
+        updated = mgr._memory_sessions["sid1"]["last_activity"]
+        assert updated > initial
+
+    def test_heartbeat_noop_for_nonexistent_session(self):
+        """Heartbeat on nonexistent session should not raise."""
+        mgr = SessionManager(redis_client=None)
+        mgr.heartbeat("nonexistent")  # Should not raise
+
+
+class TestStaleSessionCleanup:
+    """Test _cleanup_stale_sessions removes sessions with no heartbeat > 45s."""
+
+    def _make_stale(self, mgr: SessionManager, session_id: str, seconds: int = 60) -> None:
+        """Force last_activity to be `seconds` ago in in-memory store."""
+        from datetime import datetime, timedelta
+        stale_time = (datetime.utcnow() - timedelta(seconds=seconds)).isoformat()
+        mgr._memory_sessions[session_id]["last_activity"] = stale_time
+
+    def test_stale_session_cleaned_on_create(self):
+        """A session with last_activity > 45s is cleaned when new session is created."""
+        mgr = SessionManager(redis_client=None, max_sessions_per_user=2)
+        mgr.create_session("user1", "sid1", "s3://bucket/f1.h5ad")
+        mgr.create_session("user1", "sid2", "s3://bucket/f2.h5ad")
+        assert mgr._get_user_session_count("user1") == 2
+
+        self._make_stale(mgr, "sid1")
+        self._make_stale(mgr, "sid2")
+
+        s3 = mgr.create_session("user1", "sid3", "s3://bucket/f3.h5ad")
+        assert s3 is not None
+        assert mgr._get_user_session_count("user1") == 1
+
+    def test_fresh_session_not_cleaned(self):
+        """A session with recent last_activity is NOT cleaned."""
+        mgr = SessionManager(redis_client=None, max_sessions_per_user=2)
+        mgr.create_session("user1", "sid1", "s3://bucket/f1.h5ad")
+        mgr.create_session("user1", "sid2", "s3://bucket/f2.h5ad")
+
+        # Only sid1 is stale; sid2 is fresh
+        self._make_stale(mgr, "sid1")
+
+        s3 = mgr.create_session("user1", "sid3", "s3://bucket/f3.h5ad")
+        assert s3 is not None
+        s2_check = mgr.get_session("sid2")
+        assert s2_check is not None and s2_check.status == SessionStatus.ACTIVE
+
+    def test_stale_cleanup_does_not_affect_other_users(self):
+        """Stale cleanup for user1 does not touch user2's sessions."""
+        mgr = SessionManager(redis_client=None, max_sessions_per_user=2, max_concurrent_sessions=20)
+        mgr.create_session("user1", "sid1", "s3://bucket/f1.h5ad")
+        mgr.create_session("user2", "sid2", "s3://bucket/f2.h5ad")
+
+        self._make_stale(mgr, "sid1")
+        mgr.create_session("user1", "sid3", "s3://bucket/f3.h5ad")
+
+        s2_check = mgr.get_session("sid2")
+        assert s2_check is not None and s2_check.status == SessionStatus.ACTIVE
+
+
+class TestThreadSafety:
+    """Basic thread safety: concurrent end_session calls should not raise."""
+
+    def test_concurrent_end_session_is_safe(self):
+        """Calling end_session from two threads simultaneously should not raise."""
+        import threading
+        mgr = SessionManager(redis_client=None)
+        mgr.create_session("user1", "sid1", "s3://bucket/file.h5ad")
+
+        errors = []
+
+        def end():
+            try:
+                mgr.end_session("sid1")
+            except Exception as e:
+                errors.append(e)
+
+        t1 = threading.Thread(target=end)
+        t2 = threading.Thread(target=end)
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
+
+        assert errors == []
         assert mgr._get_active_count() == 0
 
