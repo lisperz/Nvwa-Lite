@@ -406,6 +406,11 @@ if prompt := st.chat_input("Ask about your data... (e.g., 'Show me the UMAP plot
 # Feedback Widget
 # ---------------------------------------------------------------------------
 
+# NEW-01(a): disabled for first-customer demo. Flip to True to re-enable.
+# NEW-01(b) — clicking the widget mid-response kills the in-flight agent turn —
+# is still open; root-cause trace deferred to a post-demo debug session.
+FEEDBACK_WIDGET_ENABLED = False
+
 # Initialize feedback state
 init_feedback_timer()
 if "plot_generated" not in st.session_state:
@@ -418,7 +423,8 @@ if "show_feedback_dialog" not in st.session_state:
     st.session_state.show_feedback_dialog = False
 
 # Auto-trigger feedback after 10 seconds if plot generated
-if (st.session_state.plot_generated and
+if (FEEDBACK_WIDGET_ENABLED and
+    st.session_state.plot_generated and
     not st.session_state.feedback_submitted and
     "session_id" in st.session_state):
 
@@ -426,11 +432,12 @@ if (st.session_state.plot_generated and
     check_feedback_timer(delay_seconds=300)
 
 # Show dialog if triggered
-if st.session_state.get("show_feedback_dialog", False):
+if FEEDBACK_WIDGET_ENABLED and st.session_state.get("show_feedback_dialog", False):
     show_feedback_dialog()
 
 # Feedback icon button (bottom left corner)
-if (st.session_state.plot_generated and
+if (FEEDBACK_WIDGET_ENABLED and
+    st.session_state.plot_generated and
     not st.session_state.feedback_submitted and
     "session_id" in st.session_state):
 
