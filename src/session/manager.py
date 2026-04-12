@@ -1,12 +1,16 @@
 """Session management with concurrency control.
 
 Manages user sessions with Redis-backed state tracking and enforces
-concurrency limits (max 1 session per user, max 2 concurrent system-wide).
+concurrency limits (max 1 session per user, max 20 concurrent system-wide).
+
+Session count is derived from live Redis keys (SCAN session:*) rather than
+a separate counter, so TTL expiry automatically reduces the count — no drift.
 """
 
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
@@ -90,7 +94,6 @@ class SessionManager:
         if self.redis is None:
             self._memory_sessions: dict[str, dict] = {}
             self._memory_user_sessions: dict[str, set[str]] = {}
-            self._memory_active_count = 0
 
     def create_session(
         self,
@@ -100,6 +103,12 @@ class SessionManager:
     ) -> Session | None:
         """Create a new session if concurrency limits allow.
 
+        Before checking limits, cleans orphaned set entries (BUG #22 fix):
+        a hard browser reload loses st.session_state but leaves the old Redis
+        entry alive. Orphaned entries (key expired but set reference remains)
+        are cleaned automatically. Live sessions are NOT evicted — the user
+        is hard-capped at max_sessions_per_user.
+
         Args:
             user_id: User identifier.
             session_id: Session identifier.
@@ -108,12 +117,15 @@ class SessionManager:
         Returns:
             Session object if created, None if limits exceeded.
         """
-        # Check user's active sessions
+        # Clean orphaned user session entries (BUG #22 fix)
+        self._cleanup_expired_user_sessions(user_id, current_session_id=session_id)
+
+        # Check user's active sessions (after cleanup)
         user_session_count = self._get_user_session_count(user_id)
         if user_session_count >= self.max_sessions_per_user:
             return None  # User at session limit
 
-        # Check system-wide concurrency
+        # Check system-wide concurrency (derived from live keys — BUG #21 fix)
         active_count = self._get_active_count()
         if active_count >= self.max_concurrent_sessions:
             return None  # System at capacity
@@ -129,8 +141,6 @@ class SessionManager:
         )
 
         self._store_session(session)
-        self._increment_active_count()
-
         return session
 
     def get_session(self, session_id: str) -> Session | None:
@@ -230,8 +240,6 @@ class SessionManager:
                 if user_id in self._memory_user_sessions:
                     self._memory_user_sessions[user_id].discard(session_id)
 
-        self._decrement_active_count()
-
     def get_queue_position(self, user_id: str) -> int | None:
         """Get user's position in the queue (if waiting).
 
@@ -263,12 +271,52 @@ class SessionManager:
             return len(self._memory_user_sessions.get(user_id, set()))
 
     def _get_active_count(self) -> int:
-        """Get current number of active sessions."""
+        """Get current number of active sessions.
+
+        BUG #21 fix: count live session:* keys via SCAN instead of reading a
+        separate counter. When Redis TTL expires a session key the count drops
+        automatically — no drift possible.
+        """
         if self.redis:
-            count = self.redis.get("active_sessions_count")
-            return int(count) if count else 0
+            count = 0
+            cursor = 0
+            while True:
+                cursor, keys = self.redis.scan(cursor, match="session:*", count=100)
+                count += len(keys)
+                if cursor == 0:
+                    break
+            return count
         else:
-            return self._memory_active_count
+            # In-memory fallback: count sessions not yet marked completed
+            return sum(
+                1 for s in self._memory_sessions.values()
+                if s.get("status") == SessionStatus.ACTIVE.value
+            )
+
+    def _cleanup_expired_user_sessions(self, user_id: str, current_session_id: str) -> None:
+        """Remove orphaned set entries for sessions whose Redis key has expired.
+
+        BUG #22 fix: a hard browser reload clears st.session_state so the old
+        session_id is lost, but if its TTL hasn't elapsed the Redis key still
+        exists and counts against the user's slot limit. This method only
+        removes set entries whose Redis key is already gone — it never evicts
+        live sessions. The user is hard-capped at max_sessions_per_user.
+
+        Args:
+            user_id: User whose expired set entries to clean.
+            current_session_id: The new session_id being created (skip if found).
+        """
+        if not self.redis:
+            return
+
+        user_sessions_key = f"user:{user_id}:sessions"
+        session_ids = self.redis.smembers(user_sessions_key)
+        for sid in session_ids:
+            if sid == current_session_id:
+                continue
+            if not self.redis.exists(f"session:{sid}"):
+                # Key already TTL-expired — remove the stale set reference
+                self.redis.srem(user_sessions_key, sid)
 
     def _store_session(self, session: Session) -> None:
         """Store session in Redis or memory."""
@@ -309,19 +357,3 @@ class SessionManager:
                 self._memory_user_sessions[session.user_id] = set()
             self._memory_user_sessions[session.user_id].add(session.session_id)
 
-    def _increment_active_count(self) -> None:
-        """Increment active session count."""
-        if self.redis:
-            self.redis.incr("active_sessions_count")
-        else:
-            self._memory_active_count += 1
-
-    def _decrement_active_count(self) -> None:
-        """Decrement active session count."""
-        if self.redis:
-            count = self.redis.decr("active_sessions_count")
-            # Ensure it doesn't go negative
-            if count < 0:
-                self.redis.set("active_sessions_count", 0)
-        else:
-            self._memory_active_count = max(0, self._memory_active_count - 1)

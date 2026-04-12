@@ -200,7 +200,17 @@ if need_reload:
     )
 
     if session is None:
-        st.error("Unable to create session. You may have an active session or the system is at capacity. Please try again later.")
+        user_count = session_manager._get_user_session_count(user.user_id)
+        if user_count >= session_manager.max_sessions_per_user:
+            st.error(
+                f"You already have {user_count} active session(s). "
+                f"Please close another session or wait for it to time out (~30 min)."
+            )
+        else:
+            st.error(
+                "The system is currently at full capacity. "
+                "Please wait a moment and try again."
+            )
         st.stop()
 
     st.session_state.adata = adata
