@@ -18,6 +18,7 @@ logs/
 # Data
 data/*.h5ad
 data/uploads/
+data/preloaded/
 
 # OS
 .DS_Store
@@ -31,3 +32,6 @@ CLAUDE.md
 # Pilot tokens (contains sensitive authentication data)
 pilot_tokens.json
 pilot_tokens.env
+
+# Preloaded datasets configuration
+preloaded_datasets.json
