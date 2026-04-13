@@ -31,6 +31,7 @@ from src.ui.components import (
     example_queries,
     file_upload_widget,
     pipeline_panel,
+    preloaded_dataset_widget,
 )
 from src.ui.feedback_dialog import show_feedback_dialog
 from src.ui.feedback_trigger import init_feedback_timer, mark_plot_generated, check_feedback_timer
@@ -225,7 +226,22 @@ if _old_sid and _old_sid != st.session_state.session_id:
     session_manager.end_session(_old_sid)
 
 
+preloaded_path = preloaded_dataset_widget(user.user_id)
 uploaded_path, s3_key = file_upload_widget(user.user_id, st.session_state.session_id)
+
+# Determine which dataset is active and its identifier for change detection
+if preloaded_path is not None:
+    active_path = preloaded_path
+    dataset_source = "preloaded"
+    current_filename = f"preloaded:{preloaded_path.name}"
+elif uploaded_path is not None:
+    active_path = uploaded_path
+    dataset_source = "upload"
+    current_filename = f"upload:{uploaded_path.name}"
+else:
+    active_path = None
+    dataset_source = None
+    current_filename = ""
 
 
 # ---------------------------------------------------------------------------
@@ -233,44 +249,41 @@ uploaded_path, s3_key = file_upload_widget(user.user_id, st.session_state.sessio
 # ---------------------------------------------------------------------------
 
 @st.cache_resource
-def load_uploaded(path: str):
-    """Load and cache an uploaded .h5ad file."""
-    logger.info("Loading uploaded file: %s", path)
+def load_dataset(path: str) -> object:
+    """Load and cache an .h5ad file from any local path."""
+    logger.info("Loading dataset: %s", path)
     adata = load_h5ad(path)
-    logger.info("Uploaded loaded: %d cells, %d genes", adata.n_obs, adata.n_vars)
+    logger.info("Dataset loaded: %d cells, %d genes", adata.n_obs, adata.n_vars)
     return adata
 
 
-# Track current dataset source to detect changes
-current_filename = uploaded_path.name if uploaded_path else ""
-
-# Check if we need to reload (new file uploaded)
+# Check if we need to load (new dataset selected or first load)
 need_reload = (
     "adata" not in st.session_state
     or st.session_state.get("_dataset_filename") != current_filename
 )
 
-if uploaded_path is None:
-    st.info("Please upload a .h5ad file in the sidebar to get started.")
+if active_path is None:
+    st.info("Select a dataset from the sidebar or upload a .h5ad file to get started.")
     st.stop()
 
 if need_reload:
     try:
-        adata = load_uploaded(str(uploaded_path))
+        adata = load_dataset(str(active_path))
     except Exception:
-        logger.exception("Failed to load uploaded file: %s", uploaded_path.name)
+        logger.exception("Failed to load dataset: %s", active_path.name)
         st.error(
-            f"Could not read **{uploaded_path.name}**. The file may be corrupt or "
-            "not a valid `.h5ad` (AnnData) file. Please upload a different file."
+            f"Could not read **{active_path.name}**. The file may be corrupt or "
+            "not a valid `.h5ad` (AnnData) file."
         )
         st.stop()
-    ds_state = detect_dataset_state(adata, source="upload", filename=uploaded_path.name)
+    ds_state = detect_dataset_state(adata, source=dataset_source, filename=active_path.name)
 
     # Try to create session (respects concurrency limits)
     session = session_manager.create_session(
         user_id=user.user_id,
         session_id=st.session_state.session_id,
-        dataset_s3_key=s3_key or f"users/{user.user_id}/sessions/{st.session_state.session_id}/uploads/{uploaded_path.name}"
+        dataset_s3_key=s3_key or f"users/{user.user_id}/sessions/{st.session_state.session_id}/{dataset_source}/{active_path.name}"
     )
 
     if session is None:
@@ -295,7 +308,7 @@ if need_reload:
     st.session_state.chat_history = []
     st.session_state.plot_generated = False
     st.session_state.feedback_submitted = False
-    logger.info(f"New session created: {st.session_state.session_id} for user: {user.user_id}")
+    logger.info("New session created: %s for user: %s (source: %s)", st.session_state.session_id, user.user_id, dataset_source)
 
 # Use session state adata (may have been replaced by preprocessing)
 adata = st.session_state.adata
