@@ -13,6 +13,7 @@ import logging
 from pathlib import Path
 
 import anndata as ad
+import numpy as np
 from anndata import AnnData
 
 logger = logging.getLogger(__name__)
@@ -29,8 +30,9 @@ def rename_seurat_obsm_keys(adata: AnnData) -> list[tuple[str, str]]:
     """Rename Seurat-style obsm keys in place to Scanpy convention.
 
     If the Scanpy-convention key already exists, the Seurat key is left alone
-    (existing data wins — no clobber). Uses `obsm.pop` so the underlying matrix
-    is not copied.
+    (existing data wins — no clobber). Seurat-converted `.h5ad` files store
+    obsm as pandas `DataFrame` (with columns like `umap_1, umap_2`); Scanpy
+    expects a 2-D `ndarray`, so the popped value is coerced via `np.asarray`.
 
     Returns the list of `(old_key, new_key)` pairs that were renamed.
     """
@@ -45,7 +47,7 @@ def rename_seurat_obsm_keys(adata: AnnData) -> list[tuple[str, str]]:
                 seurat_key, scanpy_key, scanpy_key, seurat_key,
             )
             continue
-        adata.obsm[scanpy_key] = adata.obsm.pop(seurat_key)
+        adata.obsm[scanpy_key] = np.asarray(adata.obsm.pop(seurat_key))
         renames.append((seurat_key, scanpy_key))
         logger.info("Renamed obsm key '%s' -> '%s'", seurat_key, scanpy_key)
     return renames

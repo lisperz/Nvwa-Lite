@@ -8,6 +8,7 @@ the project dataset. Run with:
 from __future__ import annotations
 
 import numpy as np
+import pandas as pd
 import pytest
 from anndata import AnnData
 
@@ -90,5 +91,31 @@ class TestRenameSeuratObsmKeys:
 
         rename_seurat_obsm_keys(a)
 
-        # Same underlying array object — no copy.
+        # np.asarray is a no-op for ndarrays — same underlying buffer, no copy.
         assert id(a.obsm["X_umap"]) == original_id
+
+    def test_dataframe_obsm_is_coerced_to_ndarray(self):
+        """Seurat-converted .h5ad stores obsm as DataFrame — must become ndarray
+        so scanpy's `basis_values[:, dims]` slicing works."""
+        a = _make_adata()
+        umap_df = pd.DataFrame(
+            np.random.rand(10, 2).astype(np.float32),
+            index=a.obs_names,
+            columns=["umap_1", "umap_2"],
+        )
+        pca_df = pd.DataFrame(
+            np.random.rand(10, 50).astype(np.float32),
+            index=a.obs_names,
+            columns=[f"PC_{i}" for i in range(1, 51)],
+        )
+        a.obsm["UMAP"] = umap_df
+        a.obsm["PCA"] = pca_df
+
+        rename_seurat_obsm_keys(a)
+
+        assert isinstance(a.obsm["X_umap"], np.ndarray)
+        assert isinstance(a.obsm["X_pca"], np.ndarray)
+        # Scanpy-style slicing must work on the coerced value.
+        sliced = a.obsm["X_umap"][:, (0, 1)]
+        assert sliced.shape == (10, 2)
+        np.testing.assert_array_equal(a.obsm["X_umap"], umap_df.to_numpy())
