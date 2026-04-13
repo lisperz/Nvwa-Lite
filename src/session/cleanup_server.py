@@ -76,7 +76,7 @@ def start_cleanup_server(
         auth_service: AuthService instance for token validation.
         port: Port to listen on (default 8503).
     """
-    server = HTTPServer(("localhost", port), CleanupHandler)
+    server = HTTPServer(("", port), CleanupHandler)
     server.session_manager = session_manager
     server.auth_service = auth_service
 
