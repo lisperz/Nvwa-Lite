@@ -271,7 +271,7 @@ def get_recent_errors(hours: int = 24, limit: int = 20) -> list[dict[str, Any]]:
             user_id,
             session_id,
             tool_name,
-            result_preview AS error_preview
+            result AS error_preview
         FROM tool_executions
         WHERE status = 'error'
           AND created_at >= NOW() - INTERVAL '%s hours'

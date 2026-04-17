@@ -26,6 +26,7 @@ services:
     build: .
     ports:
       - "8501:8501"
+      - "8503:8503"
     env_file:
       - .env
     environment:
@@ -36,7 +37,9 @@ services:
       - ./.streamlit:/app/.streamlit
       - ./logs:/app/logs
       - ./data/uploads:/app/data/uploads
+      - ./data/preloaded:/app/data/preloaded
       - ./pilot_tokens.json:/app/pilot_tokens.json
+      - ./preloaded_datasets.json:/app/preloaded_datasets.json
     depends_on:
       redis:
         condition: service_healthy

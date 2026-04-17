@@ -17,10 +17,10 @@ _PROJECT_ROOT = str(Path(__file__).resolve().parent.parent.parent)
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
-import anndata as ad
 import streamlit as st
 
 from src.agent.core import create_agent
+from src.analysis.h5ad_loader import load_h5ad
 from src.agent.tools import clear_plot_results, clear_table_results, get_plot_results, get_table_results, set_adata_replaced_callback, set_plot_generated_callback
 from src.agent.viz_state import VisualizationState, get_viz_state
 from src.auth.service import AuthService
@@ -31,6 +31,7 @@ from src.ui.components import (
     example_queries,
     file_upload_widget,
     pipeline_panel,
+    preloaded_dataset_widget,
 )
 from src.ui.feedback_dialog import show_feedback_dialog
 from src.ui.feedback_trigger import init_feedback_timer, mark_plot_generated, check_feedback_timer
@@ -95,8 +96,15 @@ def get_session_manager():
         session_timeout_minutes=timeout_mins,
     )
 
+@st.cache_resource
+def start_cleanup_server_once():
+    """Start cleanup HTTP server for sendBeacon (runs once per app lifecycle)."""
+    from src.session.cleanup_server import start_cleanup_server
+    start_cleanup_server(session_manager=get_session_manager(), auth_service=get_auth_service(), port=8503)
+
 auth_service = get_auth_service()
 session_manager = get_session_manager()
+start_cleanup_server_once()  # Start background cleanup endpoint
 
 # Check authentication
 if "user" not in st.session_state:
@@ -159,7 +167,81 @@ if "session_id" not in st.session_state:
     import uuid
     st.session_state.session_id = str(uuid.uuid4())
 
+# ---------------------------------------------------------------------------
+# Session cleanup bridge (JS → Python)
+# ---------------------------------------------------------------------------
+# Phase 1: On page load, JS reads the old session_id from sessionStorage and
+# writes it to a short-lived cookie so Python can end it synchronously before
+# creating a new session. This handles the refresh case immediately.
+#
+# Phase 2: JS registers pagehide/beforeunload to sendBeacon to the cleanup
+# endpoint, handling tab close and navigate-away.
+#
+# Note: st.components.v1.html() is one-way (Python→JS only). The cookie is
+# the return channel. Token is embedded in the page — acceptable for pilot
+# since the user is already authenticated and it's their own token.
+
+_current_token = st.session_state.get("token", "")
+_current_sid = st.session_state.session_id
+
+st.components.v1.html(f"""
+<script>
+(function() {{
+  var OLD_SID_KEY = "nvwa_session_id";
+  var CLEANUP_URL = "/api/cleanup";
+
+  // --- Phase 1: cookie bridge for refresh ---
+  var oldSid = sessionStorage.getItem(OLD_SID_KEY);
+  if (oldSid && oldSid !== "{_current_sid}") {{
+    // Write old session_id to a short-lived cookie so Python can read it
+    document.cookie = "nvwa_old_session=" + encodeURIComponent(oldSid) + ";path=/;max-age=10;SameSite=Strict";
+  }}
+
+  // Update sessionStorage with the current session_id
+  sessionStorage.setItem(OLD_SID_KEY, "{_current_sid}");
+
+  // --- Phase 2: sendBeacon for tab close / navigate away ---
+  var beaconSent = false;
+  function sendCleanup() {{
+    if (beaconSent) return;
+    beaconSent = true;
+    var payload = JSON.stringify({{session_id: "{_current_sid}", token: "{_current_token}"}});
+    navigator.sendBeacon(CLEANUP_URL, new Blob([payload], {{type: "application/json"}}));
+  }}
+
+  // pagehide is the modern, reliable event (Chrome/Safari/Edge/Firefox + mobile)
+  window.addEventListener("pagehide", sendCleanup);
+  // beforeunload as belt-and-suspenders for desktop browsers
+  window.addEventListener("beforeunload", sendCleanup);
+}})();
+</script>
+""", height=0)
+
+# ---------------------------------------------------------------------------
+# Cookie bridge: end old session from previous page load (refresh recovery)
+# ---------------------------------------------------------------------------
+_old_sid = st.context.cookies.get("nvwa_old_session")
+if _old_sid and _old_sid != st.session_state.session_id:
+    logger.info("Refresh detected: ending old session %s for user %s", _old_sid, user.user_id)
+    session_manager.end_session(_old_sid)
+
+
+preloaded_path = preloaded_dataset_widget(user.user_id)
 uploaded_path, s3_key = file_upload_widget(user.user_id, st.session_state.session_id)
+
+# Determine which dataset is active and its identifier for change detection
+if preloaded_path is not None:
+    active_path = preloaded_path
+    dataset_source = "preloaded"
+    current_filename = f"preloaded:{preloaded_path.name}"
+elif uploaded_path is not None:
+    active_path = uploaded_path
+    dataset_source = "upload"
+    current_filename = f"upload:{uploaded_path.name}"
+else:
+    active_path = None
+    dataset_source = None
+    current_filename = ""
 
 
 # ---------------------------------------------------------------------------
@@ -167,40 +249,55 @@ uploaded_path, s3_key = file_upload_widget(user.user_id, st.session_state.sessio
 # ---------------------------------------------------------------------------
 
 @st.cache_resource
-def load_uploaded(path: str):
-    """Load and cache an uploaded .h5ad file."""
-    logger.info("Loading uploaded file: %s", path)
-    adata = ad.read_h5ad(path)
-    logger.info("Uploaded loaded: %d cells, %d genes", adata.n_obs, adata.n_vars)
+def load_dataset(path: str) -> object:
+    """Load and cache an .h5ad file from any local path."""
+    logger.info("Loading dataset: %s", path)
+    adata = load_h5ad(path)
+    logger.info("Dataset loaded: %d cells, %d genes", adata.n_obs, adata.n_vars)
     return adata
 
 
-# Track current dataset source to detect changes
-current_filename = uploaded_path.name if uploaded_path else ""
-
-# Check if we need to reload (new file uploaded)
+# Check if we need to load (new dataset selected or first load)
 need_reload = (
     "adata" not in st.session_state
     or st.session_state.get("_dataset_filename") != current_filename
 )
 
-if uploaded_path is None:
-    st.info("Please upload a .h5ad file in the sidebar to get started.")
+if active_path is None:
+    st.info("Select a dataset from the sidebar or upload a .h5ad file to get started.")
     st.stop()
 
 if need_reload:
-    adata = load_uploaded(str(uploaded_path))
-    ds_state = detect_dataset_state(adata, source="upload", filename=uploaded_path.name)
+    try:
+        adata = load_dataset(str(active_path))
+    except Exception:
+        logger.exception("Failed to load dataset: %s", active_path.name)
+        st.error(
+            f"Could not read **{active_path.name}**. The file may be corrupt or "
+            "not a valid `.h5ad` (AnnData) file."
+        )
+        st.stop()
+    ds_state = detect_dataset_state(adata, source=dataset_source, filename=active_path.name)
 
     # Try to create session (respects concurrency limits)
     session = session_manager.create_session(
         user_id=user.user_id,
         session_id=st.session_state.session_id,
-        dataset_s3_key=s3_key or f"users/{user.user_id}/sessions/{st.session_state.session_id}/uploads/{uploaded_path.name}"
+        dataset_s3_key=s3_key or f"users/{user.user_id}/sessions/{st.session_state.session_id}/{dataset_source}/{active_path.name}"
     )
 
     if session is None:
-        st.error("Unable to create session. You may have an active session or the system is at capacity. Please try again later.")
+        user_count = session_manager._get_user_session_count(user.user_id)
+        if user_count >= session_manager.max_sessions_per_user:
+            st.error(
+                f"You already have {user_count} active session(s). "
+                f"Please close another session or wait for it to time out (~30 min)."
+            )
+        else:
+            st.error(
+                "The system is currently at full capacity. "
+                "Please wait a moment and try again."
+            )
         st.stop()
 
     st.session_state.adata = adata
@@ -211,7 +308,7 @@ if need_reload:
     st.session_state.chat_history = []
     st.session_state.plot_generated = False
     st.session_state.feedback_submitted = False
-    logger.info(f"New session created: {st.session_state.session_id} for user: {user.user_id}")
+    logger.info("New session created: %s for user: %s (source: %s)", st.session_state.session_id, user.user_id, dataset_source)
 
 # Use session state adata (may have been replaced by preprocessing)
 adata = st.session_state.adata
@@ -219,6 +316,17 @@ ds_state = st.session_state.ds_state
 
 pipeline_panel(ds_state)
 example_queries()
+
+# ---------------------------------------------------------------------------
+# Heartbeat (fallback only — runs if sendBeacon fails)
+# ---------------------------------------------------------------------------
+@st.fragment(run_every=15)
+def _session_heartbeat():
+    """Update last_activity every 15s. Fallback for when sendBeacon fails."""
+    if "session_id" in st.session_state:
+        session_manager.heartbeat(st.session_state.session_id)
+
+_session_heartbeat()  # Start the heartbeat fragment
 
 
 def _on_adata_replaced(new_adata) -> None:
@@ -406,6 +514,11 @@ if prompt := st.chat_input("Ask about your data... (e.g., 'Show me the UMAP plot
 # Feedback Widget
 # ---------------------------------------------------------------------------
 
+# NEW-01(a): disabled for first-customer demo. Flip to True to re-enable.
+# NEW-01(b) — clicking the widget mid-response kills the in-flight agent turn —
+# is still open; root-cause trace deferred to a post-demo debug session.
+FEEDBACK_WIDGET_ENABLED = False
+
 # Initialize feedback state
 init_feedback_timer()
 if "plot_generated" not in st.session_state:
@@ -418,7 +531,8 @@ if "show_feedback_dialog" not in st.session_state:
     st.session_state.show_feedback_dialog = False
 
 # Auto-trigger feedback after 10 seconds if plot generated
-if (st.session_state.plot_generated and
+if (FEEDBACK_WIDGET_ENABLED and
+    st.session_state.plot_generated and
     not st.session_state.feedback_submitted and
     "session_id" in st.session_state):
 
@@ -426,11 +540,12 @@ if (st.session_state.plot_generated and
     check_feedback_timer(delay_seconds=300)
 
 # Show dialog if triggered
-if st.session_state.get("show_feedback_dialog", False):
+if FEEDBACK_WIDGET_ENABLED and st.session_state.get("show_feedback_dialog", False):
     show_feedback_dialog()
 
 # Feedback icon button (bottom left corner)
-if (st.session_state.plot_generated and
+if (FEEDBACK_WIDGET_ENABLED and
+    st.session_state.plot_generated and
     not st.session_state.feedback_submitted and
     "session_id" in st.session_state):
 
