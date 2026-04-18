@@ -16,6 +16,11 @@ from typing import TYPE_CHECKING
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_openai import ChatOpenAI
 
+from src.agent.output_guard import (
+    REPHRASE_FALLBACK_MESSAGE,
+    build_corrective_system_message,
+    check_output_honesty,
+)
 from src.agent.prompts import build_system_prompt
 from src.agent.router import classify_intent
 from src.agent.tools import bind_dataset, bind_dataset_state, get_all_tools
@@ -183,6 +188,12 @@ class AgentRunner:
         total_input_tokens = 0
         total_output_tokens = 0
 
+        # Output-honesty guard state (T-029). One-shot retry on fabricated
+        # artifact claims; surface rephrase message to user if retry re-hallucinates.
+        guard_attempts = 0
+        first_hallucinated_excerpt: str | None = None
+        guard_exhausted = False
+
         try:
             for _ in range(max_iterations):
                 response = self._llm.invoke(messages)
@@ -196,6 +207,64 @@ class AgentRunner:
                         total_output_tokens += usage.get("completion_tokens", 0)
 
                 if not response.tool_calls:
+                    # If a tool ran earlier in this turn, the final text is a
+                    # legitimate summary of tool output — guard does not apply.
+                    if tool_called:
+                        hit_max_iterations = False
+                        break
+
+                    guard = check_output_honesty(
+                        response.content or "", response.tool_calls
+                    )
+                    if not guard.triggered:
+                        hit_max_iterations = False
+                        break
+
+                    excerpt = (response.content or "")[:500]
+                    if guard_attempts == 0:
+                        logger.warning(
+                            "Output guard triggered (attempt 1): matched=%r",
+                            guard.matched_phrase,
+                        )
+                        if self._event_logger and self._user_id and self._session_id:
+                            self._event_logger.log_session_event(
+                                user_id=self._user_id,
+                                session_id=self._session_id,
+                                event_type="output_guard_triggered",
+                                metadata={
+                                    "attempt": 1,
+                                    "matched_phrase": guard.matched_phrase,
+                                    "assistant_text_excerpt": excerpt,
+                                    "turn_id": turn_id,
+                                },
+                            )
+                        first_hallucinated_excerpt = excerpt
+                        guard_attempts += 1
+                        messages.append(SystemMessage(
+                            content=build_corrective_system_message(
+                                guard.matched_phrase or ""
+                            )
+                        ))
+                        continue
+
+                    logger.warning(
+                        "Output guard exhausted (attempt 2): matched=%r",
+                        guard.matched_phrase,
+                    )
+                    if self._event_logger and self._user_id and self._session_id:
+                        self._event_logger.log_session_event(
+                            user_id=self._user_id,
+                            session_id=self._session_id,
+                            event_type="output_guard_exhausted",
+                            metadata={
+                                "attempt": 2,
+                                "matched_phrase": guard.matched_phrase,
+                                "first_assistant_text_excerpt": first_hallucinated_excerpt,
+                                "second_assistant_text_excerpt": excerpt,
+                                "turn_id": turn_id,
+                            },
+                        )
+                    guard_exhausted = True
                     hit_max_iterations = False
                     break
 
@@ -279,7 +348,10 @@ class AgentRunner:
                         ToolMessage(content=str(result), tool_call_id=tool_call["id"])
                     )
 
-            final_text = response.content if response.content else ""
+            if guard_exhausted:
+                final_text = REPHRASE_FALLBACK_MESSAGE
+            else:
+                final_text = response.content if response.content else ""
             response_time = time.time() - start_time
             end_reason = "max_iterations" if hit_max_iterations else "normal"
 
