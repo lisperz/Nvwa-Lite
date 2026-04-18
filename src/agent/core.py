@@ -23,7 +23,7 @@ from src.agent.output_guard import (
 )
 from src.agent.prompts import build_system_prompt
 from src.agent.router import classify_intent
-from src.agent.tools import bind_dataset, bind_dataset_state, get_all_tools
+from src.agent.tools import bind_dataset, bind_dataset_state, bind_logger, get_all_tools
 from src.agent.viz_state import VisualizationState, bind_viz_state
 from src.db.logger import DatabaseLogger
 from src.logging.service import EventLogger
@@ -98,6 +98,7 @@ def create_agent(
     if user_id and session_id:
         event_logger = EventLogger()
         db_logger = DatabaseLogger()
+    bind_logger(event_logger, user_id, session_id)
 
     return AgentRunner(
         llm_with_tools, tools, system_prompt, event_logger, db_logger,

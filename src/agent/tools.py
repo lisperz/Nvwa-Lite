@@ -22,6 +22,7 @@ from src.analysis.differential import get_de_dataframe, run_differential_express
 from src.analysis.marker_genes import get_top_marker_genes_per_cluster
 from src.analysis.preprocessing import run_preprocessing
 from src.analysis.qc_metrics import get_obs_column_statistics, resolve_qc_metric_column, summarize_qc_metrics
+from src.logging.uns_snapshot import emit_uns_snapshot
 from src.plotting.comparison import plot_dotplot, plot_heatmap, plot_scatter
 from src.plotting.composition import plot_composition
 from src.plotting.executor import PlotResult, TableResult, plot_feature, plot_umap, plot_violin
@@ -30,6 +31,7 @@ from src.types import DatasetState, detect_dataset_state
 
 if TYPE_CHECKING:
     from anndata import AnnData
+    from src.logging.service import EventLogger
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +41,9 @@ _plot_results: list[PlotResult] = []
 _table_results: list[TableResult] = []
 _adata_replaced_callback: Callable[[AnnData], None] | None = None
 _plot_generated_callback: Callable[[], None] | None = None
+_event_logger: EventLogger | None = None
+_user_id: str | None = None
+_session_id: str | None = None
 
 
 def bind_dataset(adata: AnnData) -> None:
@@ -67,6 +72,28 @@ def set_plot_generated_callback(cb: Callable[[], None]) -> None:
     global _plot_generated_callback  # noqa: PLW0603
     _plot_generated_callback = cb
     subset_tools._plot_generated_callback = cb
+
+
+def bind_logger(event_logger: EventLogger | None, user_id: str | None, session_id: str | None) -> None:
+    """Bind EventLogger + user/session IDs so DE tools can emit uns_snapshot events."""
+    global _event_logger, _user_id, _session_id  # noqa: PLW0603
+    _event_logger = event_logger
+    _user_id = user_id
+    _session_id = session_id
+
+
+def _emit_uns_snapshot_if_bound(tool_name: str, prior_keys: list[str]) -> None:
+    """No-op when logger is unbound (unit tests, missing user/session)."""
+    if _event_logger is None or _user_id is None or _session_id is None or _adata is None:
+        return
+    emit_uns_snapshot(
+        logger=_event_logger,
+        user_id=_user_id,
+        session_id=_session_id,
+        tool_name=tool_name,
+        adata=_adata,
+        prior_keys=prior_keys,
+    )
 
 
 def _get_adata() -> AnnData:
@@ -769,7 +796,10 @@ def differential_expression(groupby: str = "", method: str = "wilcoxon", n_genes
         groupby = _get_cluster_key()
 
     try:
+        prior_uns_keys = list(adata.uns.keys())
         result = run_differential_expression(adata, groupby=groupby, method=method, n_genes=n_genes, target_group=None)
+        # TODO: mirror in DatabaseLogger when T-027 asymmetry-fix lands
+        _emit_uns_snapshot_if_bound("differential_expression", prior_uns_keys)
         _update_state()
         return result.message
     except ValueError as e:
@@ -833,6 +863,7 @@ def get_cluster_degs(
             return "Error: Cluster identifier resolved to 'all clusters'. Use differential_expression for all clusters."
 
         # Run one-vs-rest DE for this specific cluster
+        prior_uns_keys = list(adata.uns.keys())
         result = run_differential_expression(
             adata,
             groupby=resolved_groupby,
@@ -840,6 +871,8 @@ def get_cluster_degs(
             n_genes=n_genes,
             target_group=resolved_cluster,
         )
+        # TODO: mirror in DatabaseLogger when T-027 asymmetry-fix lands
+        _emit_uns_snapshot_if_bound("get_cluster_degs", prior_uns_keys)
         _update_state()
         return result.message
     except ValueError as e:
@@ -890,6 +923,7 @@ def compare_groups_de(
     groupby_param = groupby if groupby else None
 
     try:
+        prior_uns_keys = list(adata.uns.keys())
         result = run_pairwise_de(
             adata,
             group1=group1,
@@ -903,6 +937,8 @@ def compare_groups_de(
             "group2": group2,
             "results_df": result.results_df
         }
+        # TODO: mirror in DatabaseLogger when T-027 asymmetry-fix lands
+        _emit_uns_snapshot_if_bound("compare_groups_de", prior_uns_keys)
         return result.message
     except ValueError as e:
         return f"Error: {e}"
