@@ -251,6 +251,13 @@ def plot_violin(
 
     logger.info("Executing: %s", code)
     sc.pl.violin(adata, keys=gene_list, groupby=groupby, rotation=45, show=False)
+
+    # Right-align x-axis labels across all subplots (one per gene for multi-gene violin)
+    for ax in plt.gcf().axes:
+        for label in ax.get_xticklabels():
+            label.set_ha('right')
+            label.set_rotation_mode('anchor')
+
     if title:
         plt.title(title)
     image = _figure_to_bytes()
@@ -325,6 +332,9 @@ def plot_feature(
             for c in range(n_cols):
                 axes.append(fig.add_subplot(gs[r, c]))
 
+        # Compute consistent dot size from full dataset to avoid oversized dots in sparse panels
+        dot_size = 120000 / len(adata)
+
         for idx, group in enumerate(groups):
             ax = axes[idx]
             mask = adata.obs[split_by] == group
@@ -332,6 +342,7 @@ def plot_feature(
             sc.pl.umap(
                 subset, color=gene, cmap="viridis",
                 vmin=vmin, vmax=vmax,
+                size=dot_size,
                 ax=ax, title=f"{split_by}: {group}",
                 show=False, colorbar_loc=None,
             )
