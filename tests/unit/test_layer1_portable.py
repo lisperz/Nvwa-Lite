@@ -494,3 +494,112 @@ class TestPlotting:
         assert valid_png(result.image)
         if _SAVE_PLOTS:
             (plot_dir / f"volcano_{group[:20]}.png").write_bytes(result.image)
+
+
+# ===========================================================================
+# Section 7 — Pairwise DE + Volcano Integration (Issue #35)
+# ===========================================================================
+
+class TestPairwiseVolcanoIntegration:
+    """Tests for issue #35: volcano plot after pairwise DE.
+
+    Verifies:
+    1. Pairwise DE does not overwrite rank_genes_groups
+    2. Volcano works for regular DE groups
+    3. Volcano works for pairwise "X vs Y" keys
+    4. Invalid volcano group raises ValueError (logs as error, not success)
+    """
+
+    def test_pairwise_de_preserves_rank_genes_groups(self, adata, profile):
+        """Pairwise DE does not overwrite prior all-vs-rest DE results."""
+        from src.analysis.differential import run_differential_expression, run_pairwise_de
+
+        groups = adata.obs[profile.primary_groupby].unique()
+        if len(groups) < 2:
+            pytest.skip("Need at least 2 groups for pairwise DE")
+
+        adata_copy = adata.copy()
+
+        # Step 1: Run all-vs-rest DE
+        run_differential_expression(
+            adata_copy, groupby=profile.primary_groupby, method="wilcoxon", n_genes=10
+        )
+        original_groups = list(adata_copy.uns["rank_genes_groups"]["names"].dtype.names)
+        assert len(original_groups) >= 2
+
+        # Step 2: Run pairwise DE
+        run_pairwise_de(
+            adata_copy,
+            group1=str(groups[0]),
+            group2=str(groups[1]),
+            groupby=profile.primary_groupby,
+        )
+
+        # Step 3: Verify rank_genes_groups still has all original groups
+        preserved_groups = list(adata_copy.uns["rank_genes_groups"]["names"].dtype.names)
+        assert preserved_groups == original_groups, (
+            f"Pairwise DE corrupted rank_genes_groups. "
+            f"Expected {len(original_groups)} groups, got {len(preserved_groups)}"
+        )
+
+    def test_volcano_works_for_regular_de_group(self, adata, profile):
+        """Volcano plot works for regular DE group after all-vs-rest."""
+        from src.analysis.differential import get_de_dataframe, run_differential_expression
+        from src.plotting.volcano import plot_volcano
+
+        groups = adata.obs[profile.primary_groupby].unique()
+        if len(groups) < 1:
+            pytest.skip("Need at least 1 group for DE")
+
+        adata_copy = adata.copy()
+        run_differential_expression(
+            adata_copy, groupby=profile.primary_groupby, method="wilcoxon", n_genes=10
+        )
+
+        group = str(groups[0])
+        de_df = get_de_dataframe(adata_copy, group=group)
+        result = plot_volcano(de_df, group=group)
+        assert valid_png(result.image)
+
+    def test_volcano_works_for_pairwise_key(self, adata, profile):
+        """Volcano plot works for pairwise 'X vs Y' key after compare_groups_de."""
+        from src.analysis.differential import get_de_dataframe, run_pairwise_de
+
+        groups = adata.obs[profile.primary_groupby].unique()
+        if len(groups) < 2:
+            pytest.skip("Need at least 2 groups for pairwise DE")
+
+        adata_copy = adata.copy()
+        group1 = str(groups[0])
+        group2 = str(groups[1])
+
+        # Run pairwise DE and store result in pairwise_de_result
+        result = run_pairwise_de(
+            adata_copy, group1=group1, group2=group2, groupby=profile.primary_groupby
+        )
+        adata_copy.uns["pairwise_de_result"] = {
+            "group1": group1,
+            "group2": group2,
+            "results_df": result.results_df,
+        }
+
+        # Volcano should work with "X vs Y" key
+        pairwise_key = f"{group1} vs {group2}"
+        de_df = get_de_dataframe(adata_copy, group=pairwise_key)
+        assert len(de_df) > 0
+        assert "gene" in de_df.columns
+        assert "log2fc" in de_df.columns
+
+    def test_invalid_volcano_group_raises_valueerror(self, adata, profile):
+        """Invalid volcano group raises ValueError (not returns error string)."""
+        from src.analysis.differential import get_de_dataframe, run_differential_expression
+
+        adata_copy = adata.copy()
+        run_differential_expression(
+            adata_copy, groupby=profile.primary_groupby, method="wilcoxon", n_genes=10
+        )
+
+        # Invalid group should raise, not return error string
+        with pytest.raises(ValueError, match="not in DE results"):
+            get_de_dataframe(adata_copy, group="nonexistent_group_xyz_abc")
+

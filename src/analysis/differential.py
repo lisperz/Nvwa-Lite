@@ -141,16 +141,18 @@ def run_pairwise_de(
 
     # Run rank_genes_groups with specific reference
     # This compares group1 vs group2 directly
+    # Use key_added to avoid overwriting the default rank_genes_groups slot
     sc.tl.rank_genes_groups(
         adata,
         groupby=resolved_groupby,
         groups=[resolved_group1],
         reference=resolved_group2,
         method=method,
+        key_added="pairwise_rank_genes",
     )
 
-    # Extract results
-    result = adata.uns["rank_genes_groups"]
+    # Extract results from dedicated pairwise slot
+    result = adata.uns["pairwise_rank_genes"]
     genes = result["names"][resolved_group1]
     logfc = result["logfoldchanges"][resolved_group1]
     pvals = result["pvals"][resolved_group1]
@@ -183,11 +185,47 @@ def run_pairwise_de(
     return DEResult(group=resolved_group1, reference=resolved_group2, results_df=df, message=message)
 
 
+def _extract_pairwise_dataframe(adata: AnnData, group: str) -> pd.DataFrame | None:
+    """Try to extract pairwise DE results for "group1 vs group2" key.
+
+    Returns DataFrame if pairwise_de_result exists and matches the key, else None.
+    """
+    if "pairwise_de_result" not in adata.uns:
+        return None
+
+    pairwise = adata.uns["pairwise_de_result"]
+    group1 = pairwise.get("group1", "")
+    group2 = pairwise.get("group2", "")
+
+    # Try exact match and common variations
+    possible_keys = [
+        f"{group1} vs {group2}",
+        f"{group1} vs. {group2}",
+        f"{group1} versus {group2}",
+    ]
+
+    if group in possible_keys:
+        return pairwise["results_df"]
+
+    return None
+
+
 def get_de_dataframe(adata: AnnData, group: str) -> pd.DataFrame:
     """Extract DE results for a specific group as a tidy DataFrame.
 
+    Supports both:
+    - Regular DE groups from rank_genes_groups (e.g., "CD4 T cells")
+    - Pairwise comparisons from pairwise_de_result (e.g., "CD4 T cells vs CD8 T cells")
+
     Returns DataFrame with columns: gene, log2fc, pval, pval_adj.
     """
+    # Try pairwise lookup first if group contains " vs "
+    if " vs" in group:
+        pairwise_df = _extract_pairwise_dataframe(adata, group)
+        if pairwise_df is not None:
+            return pairwise_df
+
+    # Fall back to regular rank_genes_groups lookup
     if "rank_genes_groups" not in adata.uns:
         raise ValueError("No DE results found. Run differential_expression first.")
 

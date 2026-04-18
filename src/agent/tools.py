@@ -489,18 +489,16 @@ def scatter_plot(gene_x: str, gene_y: str, color_by: str = "") -> str:
 def volcano_plot_tool(group: str) -> str:
     """Generate a volcano plot for a specific cluster from DE results.
 
+    Supports both regular DE groups and pairwise comparisons:
+    - Regular: volcano_plot_tool(group="CD4 T cells")
+    - Pairwise: volcano_plot_tool(group="CD4 T cells vs CD8 T cells")
+
     Args:
-        group: The cluster/group name to plot (e.g. '0', '1').
+        group: The cluster/group name or pairwise comparison (e.g., '0', 'CD4 T cells vs CD8 T cells').
     """
     adata = _get_adata()
-    try:
-        de_df = get_de_dataframe(adata, group=group)
-        return _store_and_return(plot_volcano(de_df, group=group))
-    except ValueError as e:
-        return f"Error: {e}"
-    except Exception as e:
-        logger.exception("Volcano plot failed")
-        return f"Unexpected error: {e}"
+    de_df = get_de_dataframe(adata, group=group)
+    return _store_and_return(plot_volcano(de_df, group=group))
 
 
 @tool
