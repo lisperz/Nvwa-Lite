@@ -214,6 +214,125 @@ class TestDifferentialExpression:
         assert isinstance(result, DEResult)
         assert len(result.results_df) > 0
 
+    # -- T-034: regression tests for T-028 (pairwise DE state preservation) --
+
+    def test_pairwise_de_preserves_allvsrest_rank_genes(self, adata, profile):
+        """Pairwise DE must not overwrite a prior all-vs-rest rank_genes_groups.
+
+        Regression test for T-028 Bug B: run_pairwise_de called
+        sc.tl.rank_genes_groups without key_added, destroying the default slot.
+        """
+        from src.analysis.differential import run_differential_expression, run_pairwise_de
+        groups = adata.obs[profile.primary_groupby].unique()
+        if len(groups) < 2:
+            pytest.skip("Need at least 2 groups for pairwise DE")
+
+        ad = adata.copy()
+        run_differential_expression(ad, groupby=profile.primary_groupby, n_genes=5)
+        groups_before = set(ad.uns["rank_genes_groups"]["names"].dtype.names)
+
+        run_pairwise_de(
+            ad,
+            group1=str(groups[0]),
+            group2=str(groups[1]),
+            groupby=profile.primary_groupby,
+        )
+        groups_after = set(ad.uns["rank_genes_groups"]["names"].dtype.names)
+
+        assert groups_after == groups_before, (
+            f"rank_genes_groups groups changed from {len(groups_before)} to "
+            f"{len(groups_after)} after pairwise DE"
+        )
+
+    def test_allvsrest_de_readable_after_pairwise(self, adata, profile):
+        """get_de_dataframe for an all-vs-rest group still works after pairwise DE.
+
+        Regression test for T-028 Bug B: verifies the data (not just the keys)
+        survives a subsequent pairwise DE call.
+        """
+        from src.analysis.differential import (
+            get_de_dataframe, run_differential_expression, run_pairwise_de,
+        )
+        groups = adata.obs[profile.primary_groupby].unique()
+        if len(groups) < 2:
+            pytest.skip("Need at least 2 groups for pairwise DE")
+
+        ad = adata.copy()
+        run_differential_expression(ad, groupby=profile.primary_groupby, n_genes=5)
+        df_before = get_de_dataframe(ad, group=str(groups[0]))
+
+        run_pairwise_de(
+            ad,
+            group1=str(groups[0]),
+            group2=str(groups[1]),
+            groupby=profile.primary_groupby,
+        )
+        df_after = get_de_dataframe(ad, group=str(groups[0]))
+
+        assert df_before.equals(df_after), (
+            "get_de_dataframe returned different results after pairwise DE"
+        )
+
+    def test_consecutive_pairwise_de_independent(self, adata, profile):
+        """Two consecutive pairwise DE calls don't corrupt rank_genes_groups.
+
+        Ensures each pairwise call writes to its own slot and the default
+        rank_genes_groups (from a prior all-vs-rest) stays intact.
+        """
+        from src.analysis.differential import run_differential_expression, run_pairwise_de
+        groups = adata.obs[profile.primary_groupby].unique()
+        if len(groups) < 3:
+            pytest.skip("Need at least 3 groups for consecutive pairwise DE")
+
+        ad = adata.copy()
+        run_differential_expression(ad, groupby=profile.primary_groupby, n_genes=5)
+        groups_before = set(ad.uns["rank_genes_groups"]["names"].dtype.names)
+
+        run_pairwise_de(
+            ad,
+            group1=str(groups[0]),
+            group2=str(groups[1]),
+            groupby=profile.primary_groupby,
+        )
+        run_pairwise_de(
+            ad,
+            group1=str(groups[1]),
+            group2=str(groups[2]),
+            groupby=profile.primary_groupby,
+        )
+        groups_after = set(ad.uns["rank_genes_groups"]["names"].dtype.names)
+
+        assert groups_after == groups_before, (
+            "rank_genes_groups corrupted after two consecutive pairwise DE calls"
+        )
+
+    def test_volcano_from_pairwise_de_dataframe(self, adata, profile, plot_dir):
+        """plot_volcano produces a valid PNG from a pairwise DE result DataFrame.
+
+        Regression test for T-028 Bug A: verifies the data path — pairwise DE
+        produces a DataFrame that plot_volcano can consume.
+        """
+        from src.analysis.differential import run_pairwise_de
+        from src.plotting.volcano import plot_volcano
+        groups = adata.obs[profile.primary_groupby].unique()
+        if len(groups) < 2:
+            pytest.skip("Need at least 2 groups for pairwise DE")
+
+        ad = adata.copy()
+        result = run_pairwise_de(
+            ad,
+            group1=str(groups[0]),
+            group2=str(groups[1]),
+            groupby=profile.primary_groupby,
+        )
+        plot_result = plot_volcano(
+            result.results_df,
+            group=f"{groups[0]} vs {groups[1]}",
+        )
+        assert valid_png(plot_result.image)
+        if _SAVE_PLOTS:
+            (plot_dir / "volcano_pairwise.png").write_bytes(plot_result.image)
+
 
 # ===========================================================================
 # Section 4 — Marker Genes  (src/analysis/marker_genes.py)
