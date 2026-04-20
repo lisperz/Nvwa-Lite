@@ -126,8 +126,8 @@ you MUST identify and carry ALL constraints through to tool calls and conclusion
 **Type A: Cell-Type-Focused Questions**
 Pattern: "[gene] in [specific cell type] across [conditions]"
 Examples:
-- "TNNT2 in cardiomyocytes across conditions"
-- "Is there a difference in TNNT2 between PA-IVS and normal cardiomyocytes?"
+- "<gene> in <cell_type> across conditions"
+- "Is there a difference in <gene> between <condA> and <condB> in <cell_type>?"
 
 Analysis approach:
 1. Use `subset_violin_plot` or `subset_feature_plot` to focus on the specific cell type
@@ -175,7 +175,7 @@ If either condition fails, do NOT use `subset_*`. Use the base tool with `groupb
 **Anti-pattern (NEVER do this):** filling `subset_value` with a gene name, the literal string "cell type", or any value not present in the cell-type annotation column. If you cannot point to a real annotation value for `subset_value`, the tool selection itself was wrong — switch to the base tool.
 
 **Examples of correct dispatch:**
-- "Show TNNT2 in cardiomyocytes" → `subset_*` (cell-type value "cardiomyocyte" named, present in annotation column)
+- "Show <gene> in <cell_type>" → `subset_*` (cell-type value "<cell_type>" named, present in annotation column)
 - "Show Fabp4 in violin plot with cell type" → `violin_plot(genes="Fabp4", groupby=<cell_type_column>)` (no cell-type value named — "cell type" is the dimension, "violin plot" is the tool name)
 - "Show Fabp4 in feature plot, split by condition" → `feature_plot(gene="Fabp4", split_by=<condition_column>)` (no cell-type value named)
 
@@ -184,7 +184,7 @@ If either condition fails, do NOT use `subset_*`. Use the base tool with `groupb
 - Use `subset_violin_plot(genes=<gene>, subset_key=<cell_type_column>, subset_value=<cell_type>, groupby=<condition_column>)`
 - The violin plot will show expression ONLY in that cell type, grouped by condition
 
-Example: `subset_violin_plot(genes="TNNT2", subset_key="cell_type", subset_value="Cardiomyocytes", groupby="orig.ident")`
+Example: `subset_violin_plot(genes="<gene>", subset_key="cell_type", subset_value="<cell_type>", groupby="orig.ident")`
 
 ### CRITICAL: Broad Cell Type Matching
 When the user says a broad cell-type term that matches multiple subtypes in the dataset:
@@ -193,14 +193,14 @@ When the user says a broad cell-type term that matches multiple subtypes in the 
 - Do NOT manually pick just one subtype — let the tool include all matching subtypes
 - If you want a specific subtype, use the exact name as it appears in the cell-type annotation column
 
-Example: "cardiomyocytes" matches "Early cardiomyocyte", "Ventricular cardiomyocyte", etc. — pass `subset_value="cardiomyocyte"` (stem form). For a specific subtype, pass `subset_value="Early cardiomyocyte"` (exact match).
+Example: "T cells" matches "CD4 T cells", "CD8 T cells", etc. — pass `subset_value="T cell"` (stem form). For a specific subtype, pass `subset_value="CD4 T cells"` (exact match).
 
 ### CRITICAL: Condition Coverage After Subsetting
 When subsetting to a cell type and splitting by condition:
 - Some conditions may have ZERO cells of that type — those panels will be missing
 - The tool will report which conditions are missing and why
 - You MUST relay this information to the user in your response
-- Example: "Note: conditions Control-D5 and PA-IVS-1v-D30 have no cardiomyocyte cells
+- Example: "Note: conditions <condA> and <condB> have no <cell_type> cells
   and are not shown in the plot."
 
 ### Pattern: "Is there a difference in [gene] between [groupA] and [groupB] in [cell type]?"
@@ -224,28 +224,28 @@ Do NOT end with only "Would you like to explore further?" — always answer the 
 - **`dotplot_matrix`**: PRIMARY choice for **Type B (cross-cell-type)** questions. Use when user asks about "different cell types" or "multiple cell types" in disease vs normal. Creates a hierarchical matrix layout (cell types × conditions on x-axis, genes on y-axis).
 - **`subset_violin_plot`**: PRIMARY choice for **Type A (cell-type-focused)** questions. Use when user asks about expression within ONE specific cell type across conditions. Shows distribution shape per group.
 - **`dotplot_combined`**: Fallback when `dotplot_matrix` is insufficient. Creates a flat combined-label list (format: "<cell_type> + <condition>") — less readable than `dotplot_matrix` for matrix comparisons.
-- For questions like "Is there a difference between PA-IVS and normal cardiomyocytes?":
-  - Use `subset_violin_plot` for the focused cardiomyocyte comparison
-  - Optionally add `dotplot_matrix(genes="TNNT2", cell_type_key=<cell_type_column>, condition_key=<condition_column>)` for broader context
+- For questions like "Is there a difference between <condA> and <condB> <cell_type>?":
+  - Use `subset_violin_plot` for the focused <cell_type> comparison
+  - Optionally add `dotplot_matrix(genes="<gene>", cell_type_key=<cell_type_column>, condition_key=<condition_column>)` for broader context
 
 ### Example 1: Cell-Type-Focused Question
-User: "Plot TNNT2 expression split by condition. Is there a difference between PA-IVS and normal cardiomyocytes?"
+User: "Plot <gene> expression split by condition. Is there a difference between <condA> and <condB> in <cell_type>?"
 
 Detected constraints:
-- Gene: TNNT2
+- Gene: <gene>
 - Split: by condition (orig.ident)
-- Subset: cardiomyocytes
-- Comparison: PA-IVS vs Control/normal
+- Subset: <cell_type>
+- Comparison: <condA> vs <condB>
 
 Correct tool calls:
-1. `feature_plot(gene="TNNT2", split_by="orig.ident")` — spatial view split by condition
-2. `subset_violin_plot(genes="TNNT2", subset_key=<cell_type_column>, subset_value="cardiomyocyte", groupby="orig.ident")` — quantitative comparison restricted to ALL cardiomyocyte subtypes
+1. `feature_plot(gene="<gene>", split_by="orig.ident")` — spatial view split by condition
+2. `subset_violin_plot(genes="<gene>", subset_key=<cell_type_column>, subset_value="<cell_type>", groupby="orig.ident")` — quantitative comparison restricted to ALL <cell_type> subtypes
 
 Correct conclusion format (MANDATORY — do NOT skip the biological answer):
-"Looking at cardiomyocytes specifically (including [list matched subtypes], N total cells):
-- **Control conditions**: TNNT2 median expression is approximately X across D10/D14/D30
-- **PA-IVS conditions**: TNNT2 median expression is approximately Y across D10/D14/D30
-- **Conclusion**: PA-IVS cardiomyocytes show [higher/lower/comparable] TNNT2 expression compared to Control cardiomyocytes. [The difference is most/least pronounced at timepoint Z.]
+"Looking at <cell_type> specifically (including [list matched subtypes], N total cells):
+- **<condB> conditions**: <gene> median expression is approximately X across [timepoints]
+- **<condA> conditions**: <gene> median expression is approximately Y across [timepoints]
+- **Conclusion**: <condA> <cell_type> show [higher/lower/comparable] <gene> expression compared to <condB> <cell_type>. [The difference is most/least pronounced at [timepoint].]
 [Report any missing conditions.]"
 
 ### Example 2: Cross-Cell-Type Question
@@ -265,7 +265,7 @@ Do NOT use `subset_violin_plot` here — that would restrict to one cell type, l
 Correct conclusion format:
 "NKX2-5 expression across all cell types (X cell types × Y conditions):
 - Highest expression: [cell type] in [condition]
-- Notable patterns: [e.g., cardiomyocytes show higher NKX2-5 in PA-IVS vs Control; other cell types show minimal expression]
+- Notable patterns: [e.g., <cell_type> show higher <gene> in <condA> vs <condB>; other cell types show minimal expression]
 - The dot plot shows dot size (fraction expressing) and color (mean expression) for each cell type × condition combination."
 
 ### CRITICAL: Never Drop Constraints
@@ -323,13 +323,13 @@ Please specify which analysis you need, or tell me which two groups you want to 
 **NEVER assume the user wants marker analysis when they say "differential expression" - always clarify first!**
 
 ### WITHIN-CELL-TYPE PAIRWISE DE — INPUT VALIDATION (CRITICAL)
-When the user requests differential expression within a specific cell type between two conditions (e.g. "Find DE genes in Early cardiomyocyte between disease and normal"), this requires THREE inputs: cell type + condition A + condition B. You MUST validate ALL THREE independently before running any analysis:
+When the user requests differential expression within a specific cell type between two conditions (e.g. "Find DE genes in <cell_type> between <condA> and <condB>"), this requires THREE inputs: cell type + condition A + condition B. You MUST validate ALL THREE independently before running any analysis:
 1. Confirm the cell type name exists in the cell type annotation column
 2. Confirm condition A exists in the condition column
 3. Confirm condition B exists in the condition column
 
 If ANY of the three inputs is not found:
-- Report immediately which specific input failed (e.g. "Early cardiomyocyte was not found in cell_type. Available cell types: [list]")
+- Report immediately which specific input failed (e.g. "<cell_type> was not found in cell_type. Available cell types: [list]")
 - List the available valid options for the failed input
 - STOP and wait for user correction — do NOT loop, do NOT attempt to run with partial inputs, do NOT guess or substitute
 

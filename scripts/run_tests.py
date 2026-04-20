@@ -25,6 +25,7 @@ import os
 import sys
 import time
 import traceback
+import uuid
 import warnings
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -128,12 +129,17 @@ def run_one(
     dataset_path: Path,
     api_key: str,
     model: str,
+    cache_nonce: str | None = None,
 ) -> tuple[str, bool, list, list]:
     """
     Load a fresh AnnData, create the agent, invoke the prompt, and collect artifacts.
 
     Returns (final_text, tool_called, plot_results, table_results).
     Raises on hard failures (caller catches and marks as error).
+
+    If cache_nonce is set, a leading `[regression-run-id: <nonce>]` tag is
+    prepended to the agent's system prompt so OpenAI prompt-prefix caching
+    does not contaminate replicated runs of the same test.
     """
     from src.agent.core import create_agent
     from src.agent.tools import clear_plot_results, clear_table_results, get_plot_results, get_table_results
@@ -150,6 +156,10 @@ def run_one(
         filename=dataset_path.name,
     )
     agent = create_agent(adata, api_key=api_key, model=model, dataset_state=state)
+    if cache_nonce is not None:
+        agent._system_prompt = (
+            f"[regression-run-id: {cache_nonce}]\n\n{agent._system_prompt}"
+        )
     resp = agent.invoke(tc["prompt"])
 
     # Collect artifacts from the module-level buffers in tools.py.
@@ -399,7 +409,21 @@ def main() -> int:
         "--api-key", default=os.environ.get("OPENAI_API_KEY", ""),
         help="OpenAI API key (default: OPENAI_API_KEY env var).",
     )
+    parser.add_argument(
+        "--repeat", type=int, default=1,
+        help=(
+            "Run the (filtered) suite N times in sequence. Each invocation "
+            "gets a unique cache-busting nonce prepended to the system "
+            "prompt so OpenAI prompt-prefix caching does not contaminate "
+            "replicated runs of the same test. Rows in the combined report "
+            "are suffixed with #1..#N. Default: 1."
+        ),
+    )
     args = parser.parse_args()
+
+    if args.repeat < 1:
+        print("ERROR: --repeat must be >= 1", file=sys.stderr)
+        return 2
 
     # ── Validate inputs ────────────────────────────────────────────────────────
 
@@ -447,94 +471,104 @@ def main() -> int:
     print(f"  dataset : {dataset_path}")
     print(f"  model   : {args.model}")
     print(f"  cases   : {len(test_cases)}")
+    if args.repeat > 1:
+        print(f"  repeat  : {args.repeat} (nonce-injected cache bust)")
     print(f"  report  : {report_path}")
     print(f"{'='*62}\n")
 
     results: list[CaseResult] = []
     suite_start = time.monotonic()
 
-    for tc in test_cases:
-        case_id         = tc["case_id"]
-        category        = tc.get("category", "unknown")
-        expected_status = tc.get("expected_status", "PASS").upper()
-        tc_notes        = tc.get("notes", "")
+    for run_idx in range(args.repeat):
+        if args.repeat > 1:
+            print(f"\n--- Run {run_idx + 1}/{args.repeat} ---")
 
-        # Manual / SKIP cases (WARN with no must_contain and "MANUAL" in prompt)
-        is_manual = (
-            expected_status == "WARN"
-            and not tc.get("must_contain")
-            and "MANUAL" in tc.get("prompt", "").upper()
-        )
+        for tc in test_cases:
+            case_id         = tc["case_id"]
+            category        = tc.get("category", "unknown")
+            expected_status = tc.get("expected_status", "PASS").upper()
+            tc_notes        = tc.get("notes", "")
+            display_id      = f"{case_id}#{run_idx + 1}" if args.repeat > 1 else case_id
 
-        print(f"[{case_id}] {tc.get('prompt', '')[:60]!r:<62} ", end="", flush=True)
+            # Manual / SKIP cases (WARN with no must_contain and "MANUAL" in prompt)
+            is_manual = (
+                expected_status == "WARN"
+                and not tc.get("must_contain")
+                and "MANUAL" in tc.get("prompt", "").upper()
+            )
 
-        result = CaseResult(
-            case_id=case_id,
-            category=category,
-            prompt=tc.get("prompt", ""),
-            expected_status=expected_status,
-            notes=tc_notes,
-        )
+            print(f"[{display_id}] {tc.get('prompt', '')[:60]!r:<62} ", end="", flush=True)
 
-        if is_manual:
-            result.status = "skip"
-            results.append(result)
-            print("SKIP (manual)")
-            continue
+            result = CaseResult(
+                case_id=display_id,
+                category=category,
+                prompt=tc.get("prompt", ""),
+                expected_status=expected_status,
+                notes=tc_notes,
+            )
 
-        # Pre-flight: dataset capability checks (cheap, no agent invocation).
-        if tc.get("requires_precomputed_umap"):
-            from src.analysis.h5ad_loader import load_h5ad as _load_h5ad
-            _adata_check = _load_h5ad(dataset_path)
-            if "X_umap" not in _adata_check.obsm:
-                result.status = "fail"
-                result.failures = [
-                    "requires_precomputed_umap: X_umap not found in dataset .obsm; "
-                    "this test requires a preprocessed dataset"
-                ]
-                result.failure_category = "missing_artifact"
+            if is_manual:
+                result.status = "skip"
                 results.append(result)
-                print(f"FAIL (0.0s) [none]")
-                print(f"         ✗ {result.failures[0]}")
+                print("SKIP (manual)")
                 continue
 
-        t0 = time.monotonic()
-        try:
-            final_text, tool_called, plot_results, table_results = run_one(
-                tc, dataset_path, args.api_key, args.model
-            )
-            result.duration_s = time.monotonic() - t0
-            result.final_text = final_text
-            result.tool_called = tool_called
-            result.plot_count = sum(1 for p in plot_results if _valid_plot(p))
-            result.table_count = sum(1 for t in table_results if _valid_table(t))
+            # Pre-flight: dataset capability checks (cheap, no agent invocation).
+            if tc.get("requires_precomputed_umap"):
+                from src.analysis.h5ad_loader import load_h5ad as _load_h5ad
+                _adata_check = _load_h5ad(dataset_path)
+                if "X_umap" not in _adata_check.obsm:
+                    result.status = "fail"
+                    result.failures = [
+                        "requires_precomputed_umap: X_umap not found in dataset .obsm; "
+                        "this test requires a preprocessed dataset"
+                    ]
+                    result.failure_category = "missing_artifact"
+                    results.append(result)
+                    print(f"FAIL (0.0s) [none]")
+                    print(f"         ✗ {result.failures[0]}")
+                    continue
 
-            failures = check(tc, final_text, plot_results, table_results)
-            result.failures = failures
+            # Per-invocation nonce when --repeat > 1 busts OpenAI prefix cache.
+            nonce = str(uuid.uuid4()) if args.repeat > 1 else None
 
-            if not failures:
-                result.status = "pass"
-            elif expected_status == "WARN":
-                result.status = "warn"
-            else:
-                result.status = "fail"
+            t0 = time.monotonic()
+            try:
+                final_text, tool_called, plot_results, table_results = run_one(
+                    tc, dataset_path, args.api_key, args.model, cache_nonce=nonce
+                )
+                result.duration_s = time.monotonic() - t0
+                result.final_text = final_text
+                result.tool_called = tool_called
+                result.plot_count = sum(1 for p in plot_results if _valid_plot(p))
+                result.table_count = sum(1 for t in table_results if _valid_table(t))
 
-        except Exception:
-            result.duration_s = time.monotonic() - t0
-            result.status = "error"
-            tb = traceback.format_exc()
-            result.failures = [tb.strip().splitlines()[-1]]
-            result.final_text = tb
+                failures = check(tc, final_text, plot_results, table_results)
+                result.failures = failures
 
-        result.failure_category = classify_failure(result)
-        results.append(result)
+                if not failures:
+                    result.status = "pass"
+                elif expected_status == "WARN":
+                    result.status = "warn"
+                else:
+                    result.status = "fail"
 
-        icon = {"pass": "PASS", "fail": "FAIL", "warn": "WARN",
-                "error": "ERROR", "skip": "SKIP"}.get(result.status, result.status)
-        artifact_info = _artifact_label(result)
-        print(f"{icon} ({result.duration_s:.1f}s) [{artifact_info}]")
-        for f in result.failures[:2]:
-            print(f"         ✗ {f}")
+            except Exception:
+                result.duration_s = time.monotonic() - t0
+                result.status = "error"
+                tb = traceback.format_exc()
+                result.failures = [tb.strip().splitlines()[-1]]
+                result.final_text = tb
+
+            result.failure_category = classify_failure(result)
+            results.append(result)
+
+            icon = {"pass": "PASS", "fail": "FAIL", "warn": "WARN",
+                    "error": "ERROR", "skip": "SKIP"}.get(result.status, result.status)
+            artifact_info = _artifact_label(result)
+            print(f"{icon} ({result.duration_s:.1f}s) [{artifact_info}]")
+            for f in result.failures[:2]:
+                print(f"         ✗ {f}")
 
     # ── Console summary ────────────────────────────────────────────────────────
 

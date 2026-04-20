@@ -280,6 +280,7 @@ tests:
     category: data_analysis
     prompt: "Compare Early cardiomyocyte in FakeCondition vs Control"
     expected_status: FAIL
+    expected_artifact_count: 0
     must_contain:
       - "FakeCondition"
     must_not_contain:
