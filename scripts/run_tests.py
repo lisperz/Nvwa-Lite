@@ -13,6 +13,11 @@ Usage
   python scripts/run_tests.py --dataset /abs/path/to/pbmc3k.h5ad --limit 3
   python scripts/run_tests.py --dataset /abs/path --model gpt-4o --report out.md
 
+  # Source-filtered runs (dataset auto-resolved from tests.yaml source_defaults):
+  python scripts/run_tests.py --source dai
+  python scripts/run_tests.py --source zhang
+  python scripts/run_tests.py --source all --dataset /abs/path/to/any.h5ad
+
 Environment
 -----------
   OPENAI_API_KEY   Required.
@@ -22,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import sys
 import time
 import traceback
@@ -76,6 +82,18 @@ PNG_MAGIC = b"\x89PNG"
 # A real matplotlib plot at 150 dpi is always well above 5 KB;
 # anything smaller is a blank/empty figure.
 MIN_PLOT_BYTES = 5_000
+
+# Rate-limit retry policy — applied inside run_one() so a TPM/RPM throttle
+# does not turn a real test case into a harness-level crash.
+RATE_LIMIT_MAX_RETRIES = 5
+RATE_LIMIT_DEFAULT_WAIT_S = 30.0
+RATE_LIMIT_WAIT_BUFFER_S = 1.0
+
+
+def _parse_retry_after(error_msg: str, default: float = RATE_LIMIT_DEFAULT_WAIT_S) -> float:
+    """Extract 'try again in X.Ys' from an OpenAI rate-limit message; fall back to default."""
+    m = re.search(r"try again in (\d+(?:\.\d+)?)s", error_msg)
+    return float(m.group(1)) if m else default
 
 
 # ── Data model ─────────────────────────────────────────────────────────────────
@@ -145,6 +163,11 @@ def run_one(
     from src.agent.tools import clear_plot_results, clear_table_results, get_plot_results, get_table_results
     from src.types import detect_dataset_state
 
+    try:
+        from openai import RateLimitError as _RateLimitError
+    except ImportError:
+        _RateLimitError = ()  # type: ignore[assignment]
+
     # Clear artifact buffers from any previous test before loading the agent.
     clear_plot_results()
     clear_table_results()
@@ -160,7 +183,27 @@ def run_one(
         agent._system_prompt = (
             f"[regression-run-id: {cache_nonce}]\n\n{agent._system_prompt}"
         )
-    resp = agent.invoke(tc["prompt"])
+
+    # Retry on RateLimitError instead of propagating as a harness error.
+    # Clear artifact buffers between attempts so a partial run can't pollute
+    # the final artifact list.
+    resp = None
+    for attempt in range(RATE_LIMIT_MAX_RETRIES + 1):
+        try:
+            resp = agent.invoke(tc["prompt"])
+            break
+        except _RateLimitError as e:  # type: ignore[misc]
+            if attempt == RATE_LIMIT_MAX_RETRIES:
+                raise
+            wait = _parse_retry_after(str(e)) + RATE_LIMIT_WAIT_BUFFER_S
+            print(
+                f"\n         [rate-limit] attempt {attempt + 1}/{RATE_LIMIT_MAX_RETRIES} "
+                f"hit, sleeping {wait:.1f}s then retrying…",
+                flush=True,
+            )
+            time.sleep(wait)
+            clear_plot_results()
+            clear_table_results()
 
     # Collect artifacts from the module-level buffers in tools.py.
     # get_plot_results() / get_table_results() clear the buffer after reading,
@@ -377,8 +420,20 @@ def main() -> int:
         epilog=__doc__,
     )
     parser.add_argument(
-        "--dataset", required=True,
-        help="Absolute path to the .h5ad dataset file.",
+        "--dataset", default=None,
+        help=(
+            "Path to the .h5ad dataset file. If omitted, resolved from "
+            "source_defaults[<source>] in the test YAML."
+        ),
+    )
+    parser.add_argument(
+        "--source",
+        default="internal",
+        help=(
+            "Filter cases by source field (default: internal). "
+            "Use 'all' to run every case regardless of source. "
+            "Cases without a source field are treated as internal."
+        ),
     )
     parser.add_argument(
         "--config", default=str(DEFAULT_CONFIG),
@@ -434,11 +489,6 @@ def main() -> int:
               file=sys.stderr)
         return 2
 
-    dataset_path = Path(args.dataset)
-    if not dataset_path.exists():
-        print(f"ERROR: Dataset not found: {dataset_path}", file=sys.stderr)
-        return 2
-
     config_path = Path(args.config)
     if not config_path.exists():
         print(f"ERROR: Config not found: {config_path}", file=sys.stderr)
@@ -448,11 +498,40 @@ def main() -> int:
         config = yaml.safe_load(f)
 
     test_cases: list[dict[str, Any]] = config.get("tests", [])
+    source_defaults: dict[str, str] = config.get("source_defaults", {})
+
+    # Filter by --source (default internal; 'all' disables filter; missing
+    # source field on a case is treated as 'internal').
+    if args.source != "all":
+        test_cases = [
+            t for t in test_cases if t.get("source", "internal") == args.source
+        ]
+
     if args.cases:
         allowed = {c.strip() for c in args.cases.split(",")}
         test_cases = [t for t in test_cases if t["case_id"] in allowed]
     elif args.limit:
         test_cases = test_cases[: args.limit]
+
+    # Resolve dataset: CLI --dataset > source_defaults[source] > error.
+    if args.dataset:
+        dataset_str = args.dataset
+    elif args.source in source_defaults and source_defaults[args.source]:
+        dataset_str = source_defaults[args.source]
+    else:
+        print(
+            f"ERROR: --dataset is required "
+            f"(no source_defaults entry for source '{args.source}').",
+            file=sys.stderr,
+        )
+        return 2
+
+    dataset_path = Path(dataset_str)
+    if not dataset_path.is_absolute():
+        dataset_path = (REPO_ROOT / dataset_path).resolve()
+    if not dataset_path.exists():
+        print(f"ERROR: Dataset not found: {dataset_path}", file=sys.stderr)
+        return 2
 
     if not test_cases:
         print("No test cases found.", file=sys.stderr)
@@ -469,6 +548,7 @@ def main() -> int:
     print(f"\n{'='*62}")
     print(f"  nvwa-mvp Regression Suite")
     print(f"  dataset : {dataset_path}")
+    print(f"  source  : {args.source}")
     print(f"  model   : {args.model}")
     print(f"  cases   : {len(test_cases)}")
     if args.repeat > 1:

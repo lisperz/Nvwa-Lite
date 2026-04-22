@@ -46,6 +46,15 @@
 version: "3.0"
 description: "Regression tests for nvwa-mvp scRNA visualization MVP"
 
+# Source filters — used by --source flag in scripts/run_tests.py.
+#   internal : default; must stay green (PR gate).
+#   dai      : customer prompts (Dai / mouse lung); tracks known-failing bugs.
+#   zhang    : customer prompts (Zhang / cardiac); tracks known-failing bugs.
+# Cases omit `source:` to default to internal. Paths resolved relative to repo root.
+source_defaults:
+  dai: local/data/lung_combined_slim_v3.h5ad
+  zhang: local/data/GSE223414_slim.h5ad
+
 tests:
 
   # ── data_analysis — core operations (PASS) ──────────────────────────────────
@@ -440,3 +449,547 @@ tests:
       Tests the heatmap tool, which has no other coverage in the suite.
       If rank_genes_groups is pre-computed the agent plots directly; otherwise
       it runs DE first then heatmap. WARN because dataset-dependent.
+
+  # ── customer: dai (mouse lung — Fabp4/Fabp5, WT/CKO/TKO, EC) ────────────────
+  # Prompts captured verbatim from Dai's 2026-04-20 session.
+  # Dataset: lung_combined_slim_v3.h5ad (auto-resolved via source_defaults).
+  # Expected_status: PASS throughout — failures here are the bugs we're tracking.
+  # Each case runs in isolation (no cross-case memory); follow-up prompts from
+  # Dai's session are intentionally included to probe ambiguity handling.
+
+  - case_id: DAI-01
+    source: dai
+    category: data_analysis
+    prompt: "what is this dataset"
+    expected_status: PASS
+    must_contain:
+      - "cells"
+      - "genes"
+    notes: >
+      Paraphrase of DA-01 (dataset overview). Lowercase, no punctuation.
+
+  - case_id: DAI-02
+    source: dai
+    category: data_analysis
+    prompt: "show me the UMAP"
+    expected_status: PASS
+    must_contain:
+      - "umap"
+    requires_plot: true
+    expected_artifact_count: 1
+    requires_precomputed_umap: true
+    notes: >
+      Paraphrase of DA-02. No color-by specified — agent may default to
+      clusters or cell_type; both acceptable.
+
+  - case_id: DAI-03
+    source: dai
+    category: data_analysis
+    prompt: "can you show the cell type information on the umap"
+    expected_status: PASS
+    must_contain:
+      - "umap"
+      - "cell type"
+    requires_plot: true
+    expected_artifact_count: 1
+    requires_precomputed_umap: true
+    notes: >
+      UMAP colored by the cell_type obs column.
+
+  - case_id: DAI-04
+    source: dai
+    category: data_analysis
+    prompt: "can you show me the gene expression for Fabp4 and Fabp5"
+    expected_status: PASS
+    must_contain:
+      - "Fabp4"
+      - "Fabp5"
+    requires_plot: true
+    notes: >
+      Two-gene expression, no plot type specified. Per C1 rule, feature +
+      violin for each gene is the target; artifact_count not asserted so the
+      test is tolerant of the agent batching differently.
+
+  - case_id: DAI-05
+    source: dai
+    category: data_analysis
+    prompt: "show Fabp4 expression on the cell types"
+    expected_status: PASS
+    must_contain:
+      - "Fabp4"
+    must_not_contain:
+      - "seurat_clusters"
+      - "seurat clusters"
+    requires_plot: true
+    notes: >
+      Tests Layer 2a parameter resolution: when user says "cell types",
+      agent must group by the cell_type obs column, not default to
+      seurat_clusters. Rewritten from a context-dependent follow-up in
+      Dai's session so the prompt is self-contained.
+
+  - case_id: DAI-07
+    source: dai
+    category: data_analysis
+    prompt: "can you compare the gene expression of Fabp4 between WT and CKO?"
+    expected_status: PASS
+    must_contain:
+      - "Fabp4"
+    requires_plot: true
+    notes: >
+      Pairwise condition comparison. WT and CKO are condition labels in obs
+      (not cluster names). Agent should subset to WT/CKO and plot — violin
+      or DE both acceptable. Known-failing in Dai's session on condition
+      resolution (see DAI-18/19).
+
+  - case_id: DAI-08
+    source: dai
+    category: data_analysis
+    prompt: "plot Fabp4 expression comparing WT and CKO on a single combined violin plot"
+    expected_status: PASS
+    must_contain:
+      - "violin"
+      - "Fabp4"
+    must_not_contain:
+      - "separate"
+      - "independent"
+      - "each panel"
+      - "not represented"
+      - "focusing on the WT"
+      - "focusing on WT"
+      - "only WT"
+      - "only CKO"
+    requires_plot: true
+    notes: >
+      Tests that WT and CKO are rendered on a single combined violin,
+      not as separate panels. Rewritten from a context-dependent follow-up
+      in Dai's session (where DAI-07 had produced split violins) so the
+      "single combined plot" constraint is explicit in the prompt.
+
+  - case_id: DAI-09
+    source: dai
+    category: data_analysis
+    prompt: "can you compare the gene expression of FABP4 across different samples?"
+    expected_status: PASS
+    must_contain:
+      - "FABP4"
+    requires_plot: true
+    notes: >
+      "Different samples" is ambiguous — could mean orig.ident, condition,
+      or another obs column. Agent should resolve or ask. Note: user typed
+      FABP4 (uppercase) while the gene in the dataset is Fabp4 (mouse).
+
+  - case_id: DAI-10
+    source: dai
+    category: data_analysis
+    prompt: "can you compare the gene expression of FABP4 across WT, CKO and TKO?"
+    expected_status: PASS
+    must_contain:
+      - "FABP4"
+    requires_plot: true
+    notes: >
+      Three-condition comparison. All three labels must be resolved in the
+      condition obs column. Paraphrase variant of DAI-07.
+
+  - case_id: DAI-11
+    source: dai
+    category: data_analysis
+    prompt: "can you compare the gene expression of FABP4 by condition?"
+    expected_status: PASS
+    must_contain:
+      - "FABP4"
+    requires_plot: true
+    notes: >
+      Generic "by condition" — agent should auto-detect condition-like
+      columns and split by all levels. Third phrasing of the same underlying
+      request (DAI-07 / DAI-10 / DAI-11) — tests paraphrase robustness.
+
+  - case_id: DAI-12
+    source: dai
+    category: data_analysis
+    prompt: "show the unique markers for the EC on a heatmap"
+    expected_status: PASS
+    must_contain:
+      - "heatmap"
+    requires_plot: true
+    notes: >
+      Markers of the EC (endothelial) cell type on a heatmap. Agent must
+      resolve EC as a cell_type label and compute markers.
+
+  - case_id: DAI-13
+    source: dai
+    category: data_analysis
+    prompt: "how about show the top 5 markers for EC on the heatmap"
+    expected_status: PASS
+    must_contain:
+      - "heatmap"
+    requires_plot: true
+    notes: >
+      Top-N markers variant of DAI-12. "how about" prefix is conversational;
+      agent must still execute.
+
+  - case_id: DAI-14
+    source: dai
+    category: data_analysis
+    prompt: "show the unique top 3 markers for all the cell types?"
+    expected_status: PASS
+    must_contain:
+      - "heatmap"
+    requires_plot: true
+    notes: >
+      Per-cell-type top-3 markers. Dataset-generic request with no hard-coded
+      genes.
+
+  - case_id: DAI-15
+    source: dai
+    category: data_analysis
+    prompt: "can you only show UMAP on EC ?"
+    expected_status: PASS
+    must_contain:
+      - "umap"
+    must_not_contain:
+      - "highlighting"
+      - "split"
+      - "panels"
+      - "each cell type"
+    requires_plot: true
+    requires_precomputed_umap: true
+    notes: >
+      Subset UMAP to a single cell type (EC). Agent should subset, not
+      highlight — "only show" implies subset. Known-failing in Dai's
+      session (produced split panels instead of subset); negatives target
+      the split-panel narration that previously slipped through.
+
+  - case_id: DAI-16
+    source: dai
+    category: out_of_scope
+    prompt: "can you show the jitterplot for the different gene expression for all cell types"
+    expected_status: FAIL
+    must_not_contain:
+      - "successfully generated"
+    notes: >
+      Jitter plot is not a supported tool. Agent must decline without
+      crashing, or redirect to violin/strip.
+
+  - case_id: DAI-17
+    source: dai
+    category: data_analysis
+    prompt: "show the volcano plot for EC"
+    expected_status: PASS
+    must_contain:
+      - "volcano"
+    requires_plot: true
+    notes: >
+      Volcano plot for EC — requires a DE result first. Agent should run DE
+      (EC vs rest, or prompt for comparator) then plot.
+
+  - case_id: DAI-18
+    source: dai
+    category: data_analysis
+    prompt: "generate the different gene expression of EC between WT and CKO and show on the volcano plot."
+    expected_status: PASS
+    must_contain:
+      - "EC"
+      - "volcano"
+    requires_plot: true
+    notes: >
+      Subset to EC, pairwise DE between WT and CKO, volcano plot. Failed in
+      Dai's session: condition labels WT/CKO not resolved against the
+      condition obs column. Exact prompt that surfaced the bug.
+
+  - case_id: DAI-19
+    source: dai
+    category: data_analysis
+    prompt: "generate the different gene expression of EC between WT and CKO condition and show on the volcano plot."
+    expected_status: PASS
+    must_contain:
+      - "EC"
+      - "volcano"
+    requires_plot: true
+    notes: >
+      Paraphrase of DAI-18 with "condition" added as a disambiguator. Same
+      bug class — useful to see whether the extra word flips the result.
+
+  # ── customer: zhang (cardiac dev — DDX21/YAP1/MKI67, SHF, D10 conditions) ────
+  # Prompts captured verbatim from Zhang's 2026-04-20 session.
+  # Dataset: GSE223414_slim.h5ad (auto-resolved via source_defaults).
+  # Expected_status: PASS throughout — failures here are the bugs we're tracking.
+
+  - case_id: ZH-01
+    source: zhang
+    category: data_analysis
+    prompt: "show me feature plot of this data"
+    expected_status: PASS
+    must_contain: []
+    must_not_contain:
+      - "successfully generated"
+    notes: >
+      No gene specified — feature plot needs a gene. Agent should ask for a
+      gene; must not silently pick one.
+
+  - case_id: ZH-02
+    source: zhang
+    category: data_analysis
+    prompt: "show me UMAP"
+    expected_status: PASS
+    must_contain:
+      - "umap"
+    requires_plot: true
+    expected_artifact_count: 1
+    requires_precomputed_umap: true
+    notes: >
+      Paraphrase of DA-02 (no "the"). Should succeed identically.
+
+  - case_id: ZH-03
+    source: zhang
+    category: data_analysis
+    prompt: "show me UMAP of cell type"
+    expected_status: PASS
+    must_contain:
+      - "umap"
+      - "cell type"
+    requires_plot: true
+    expected_artifact_count: 1
+    requires_precomputed_umap: true
+    notes: >
+      UMAP colored by cell_type obs column. Natural-language variant.
+
+  - case_id: ZH-04
+    source: zhang
+    category: data_analysis
+    prompt: "UMAP split by condition"
+    expected_status: PASS
+    must_contain:
+      - "umap"
+    requires_plot: true
+    requires_precomputed_umap: true
+    notes: >
+      UMAP split (one panel per condition level). Agent should detect a
+      condition-like obs column.
+
+  - case_id: ZH-05
+    source: zhang
+    category: data_analysis
+    prompt: "feature plot of DDX21 split by condition"
+    expected_status: PASS
+    must_contain:
+      - "DDX21"
+    requires_plot: true
+    requires_precomputed_umap: true
+    notes: >
+      Feature plot of a single gene, split by condition (multi-panel).
+
+  - case_id: ZH-06
+    source: zhang
+    category: data_analysis
+    prompt: "feature plot of DDX21 by cell type"
+    expected_status: PASS
+    must_contain:
+      - "DDX21"
+    requires_plot: true
+    requires_precomputed_umap: true
+    notes: >
+      Ambiguous: "by cell type" on a feature plot could mean split-panel or
+      just the single feature plot on a UMAP where cell types are visible.
+      Agent should interpret reasonably.
+
+  - case_id: ZH-07
+    source: zhang
+    category: data_analysis
+    prompt: "feature plot of DDX21 in all cells"
+    expected_status: PASS
+    must_contain:
+      - "DDX21"
+    requires_plot: true
+    expected_artifact_count: 1
+    requires_precomputed_umap: true
+    notes: >
+      Single feature plot, no subsetting. "in all cells" is explicit scope
+      confirmation.
+
+  - case_id: ZH-08
+    source: zhang
+    category: data_analysis
+    prompt: "show a violin plot for DDX21 across all clusters"
+    expected_status: PASS
+    must_contain:
+      - "violin"
+      - "DDX21"
+    requires_plot: true
+    expected_artifact_count: 1
+    notes: >
+      Direct analogue of DA-03 on Zhang's dataset.
+
+  - case_id: ZH-09
+    source: zhang
+    category: data_analysis
+    prompt: "show a violin plot for DDX21 across all cell types"
+    expected_status: PASS
+    must_contain:
+      - "violin"
+      - "DDX21"
+    requires_plot: true
+    expected_artifact_count: 1
+    notes: >
+      Same request as ZH-08 but grouped by cell_type instead of leiden.
+
+  - case_id: ZH-10
+    source: zhang
+    category: data_analysis
+    prompt: "show volcano plot of DDX21 for SHF"
+    expected_status: PASS
+    must_contain: []
+    must_not_contain:
+      - "successfully generated"
+      - "scatter"
+    notes: >
+      Volcano plot for the SHF cell-type subset. Single-gene phrasing is
+      unusual for volcano (volcano shows all genes). Two behaviors acceptable:
+      (1) agent asks for clarification (2b path), or (2) agent resolves SHF
+      as a cell-type subset, runs DE on SHF vs rest, and plots the volcano
+      with DDX21 highlighted. Silent substitution (e.g. scatter fallback, or
+      false-success claim on the wrong plot) is the bug we guard against.
+
+  - case_id: ZH-11
+    source: zhang
+    category: data_analysis
+    prompt: "draw a UMAP label the cell types"
+    expected_status: PASS
+    must_contain:
+      - "umap"
+      - "cell type"
+    must_not_contain:
+      - "seurat_clusters"
+    requires_plot: true
+    expected_artifact_count: 1
+    requires_precomputed_umap: true
+    notes: >
+      Imperative "label the cell types" — UMAP colored/annotated by cell_type.
+      Grammatically odd but intent is clear. Silent-substitution guard: must
+      not label by seurat_clusters (the cluster-id column) when the user asked
+      for cell-type labels.
+
+  - case_id: ZH-12
+    source: zhang
+    category: data_analysis
+    prompt: "show me feature plot of DDX21 in SHF progenitor by condition"
+    expected_status: PASS
+    must_contain:
+      - "DDX21"
+    requires_plot: true
+    requires_precomputed_umap: true
+    notes: >
+      Subset to "SHF progenitor" cell type, feature plot of DDX21 split by
+      condition. Cell-type label resolution (exact match vs partial) is the
+      risk.
+
+  - case_id: ZH-13
+    source: zhang
+    category: data_analysis
+    prompt: "draw a violin plot of DDX21 in SHF by condition"
+    expected_status: PASS
+    must_contain:
+      - "violin"
+      - "DDX21"
+    requires_plot: true
+    expected_artifact_count: 1
+    notes: >
+      Violin for DDX21, subset to SHF, grouped by condition. User named the
+      plot type — per C1 rule (see DA-03), only the violin is expected; a
+      bonus feature plot is an unsolicited-output bug.
+
+  - case_id: ZH-14
+    source: zhang
+    category: data_analysis
+    prompt: "draw a violin plot of YAP1 in SHF by condition"
+    expected_status: PASS
+    must_contain:
+      - "violin"
+      - "YAP1"
+    requires_plot: true
+    expected_artifact_count: 1
+    notes: >
+      Same shape as ZH-13 with a different gene — paraphrase robustness check.
+      expected_artifact_count=1 per C1 rule; bonus plot is a scope-creep bug.
+
+  - case_id: ZH-15
+    source: zhang
+    category: data_analysis
+    prompt: "draw a violin plot of MKI67 in all cells by condition"
+    expected_status: PASS
+    must_contain:
+      - "violin"
+      - "MKI67"
+    requires_plot: true
+    notes: >
+      No cell-type subset; just condition grouping across all cells.
+
+  - case_id: ZH-16
+    source: zhang
+    category: data_analysis
+    prompt: "draw a feature plot of MKI67 by condition"
+    expected_status: PASS
+    must_contain:
+      - "MKI67"
+    requires_plot: true
+    requires_precomputed_umap: true
+    notes: >
+      Feature plot of MKI67 split by condition.
+
+  - case_id: ZH-17
+    source: zhang
+    category: data_analysis
+    prompt: "draw a feature plot of MKI67 by conditions"
+    expected_status: PASS
+    must_contain:
+      - "MKI67"
+    requires_plot: true
+    requires_precomputed_umap: true
+    notes: >
+      Typo-variant of ZH-16 ("conditions" plural). Agent should treat
+      identically.
+
+  - case_id: ZH-18
+    source: zhang
+    category: out_of_scope
+    prompt: "draw a correlation of DDX21 and YAP1"
+    expected_status: FAIL
+    expected_artifact_count: 0
+    must_not_contain:
+      - "successfully generated"
+    notes: >
+      Gene-gene correlation plot is not a standard tool in the current suite.
+      If a scatter tool exists and handles this, promote to data_analysis.
+      Verify against tool inventory before accepting as a legitimate FAIL.
+      expected_artifact_count=0 is the strong guard; must_not_contain kept as
+      a belt-and-suspenders phrase check.
+
+  - case_id: ZH-19
+    source: zhang
+    category: out_of_scope
+    prompt: "draw a correlation of DDX21 and YAP1 in SHF"
+    expected_status: FAIL
+    expected_artifact_count: 0
+    must_not_contain:
+      - "successfully generated"
+    notes: >
+      Same as ZH-18, subset to SHF. expected_artifact_count=0 is the strong
+      guard; must_not_contain kept as a belt-and-suspenders phrase check.
+
+  - case_id: ZH-20
+    source: zhang
+    category: data_analysis
+    prompt: "show me UMAP of condition D10 by group"
+    expected_status: PASS
+    must_contain:
+      - "umap"
+      - "D10"
+      - "group"
+    requires_plot: true
+    requires_precomputed_umap: true
+    notes: >
+      Subset to condition == D10, colored by "group" (another obs column).
+      Two obs lookups in one prompt — disambiguation test. must_contain
+      forces the agent to reference both D10 (subset) and group (color key);
+      drops of either dimension in the response indicate silent substitution
+      (e.g. the agent splits by condition instead of subsetting, or colors
+      by something other than group).
