@@ -55,9 +55,18 @@ def create_cluster_index_mapping(adata: AnnData, groupby: str) -> dict[int, str]
 
     Returns:
         Dictionary mapping numeric index to cluster/cell type name.
-        Sorted alphabetically for consistency.
+        Sorted numerically if all values are integers, otherwise alphabetically.
     """
-    unique_groups = sorted(adata.obs[groupby].astype(str).unique())
+    unique_groups = adata.obs[groupby].astype(str).unique()
+
+    # Try numeric sort if all values parse as integers
+    try:
+        int_values = [(int(g), g) for g in unique_groups]
+        unique_groups = [g for _, g in sorted(int_values)]
+    except ValueError:
+        # Fall back to string sort if any value is non-numeric
+        unique_groups = sorted(unique_groups)
+
     return {idx: group for idx, group in enumerate(unique_groups)}
 
 
