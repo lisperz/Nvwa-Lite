@@ -110,7 +110,7 @@ def _get_cluster_key() -> str:
 
     # Fallback detection
     adata = _get_adata()
-    for key in ("leiden", "louvain"):
+    for key in ("leiden", "louvain", "seurat_clusters", "cluster", "clusters"):
         if key in adata.obs.columns:
             return key
 
