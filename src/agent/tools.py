@@ -130,12 +130,8 @@ def _update_state() -> None:
 def _store_and_return(result: PlotResult) -> str:
     """Append a PlotResult to the buffer and return a text summary."""
     _plot_results.append(result)
-    logger.info(f"[FEEDBACK] _store_and_return called, callback exists: {_plot_generated_callback is not None}")
     if _plot_generated_callback:
-        logger.info("[FEEDBACK] Invoking plot generated callback")
         _plot_generated_callback()
-    else:
-        logger.warning("[FEEDBACK] No plot generated callback registered!")
     return f"Plot generated successfully.\nCode: {result.code}\n{result.message}"
 
 

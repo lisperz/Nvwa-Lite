@@ -142,7 +142,7 @@ def plot_umap(
 
             # Create a mask for this group
             mask = adata.obs[split_by] == group
-            subset = adata[mask, :]
+            subset = adata[mask, :].copy()
 
             # Plot UMAP for this subset without legend
             sc.pl.umap(
@@ -338,7 +338,7 @@ def plot_feature(
         for idx, group in enumerate(groups):
             ax = axes[idx]
             mask = adata.obs[split_by] == group
-            subset = adata[mask, :]
+            subset = adata[mask, :].copy()
             sc.pl.umap(
                 subset, color=gene, cmap="viridis",
                 vmin=vmin, vmax=vmax,
