@@ -199,7 +199,7 @@ def umap_plot(color_by: str, show_labels: bool = False, show_legend: bool = True
         return f"Error: {e}"
     except Exception as e:
         logger.exception("UMAP plot failed")
-        return f"Unexpected error: {e}"
+        return f"Error: Unexpected — {e}"
 
 
 @tool
@@ -231,7 +231,7 @@ def violin_plot(genes: str, groupby: str = "") -> str:
         return f"Error: {e}"
     except Exception as e:
         logger.exception("Violin plot failed")
-        return f"Unexpected error: {e}"
+        return f"Error: Unexpected — {e}"
 
 
 @tool
@@ -257,7 +257,7 @@ def dotplot(genes: str, groupby: str = "") -> str:
         return f"Error: {e}"
     except Exception as e:
         logger.exception("Dot plot failed")
-        return f"Unexpected error: {e}"
+        return f"Error: Unexpected — {e}"
 
 
 @tool
@@ -321,7 +321,7 @@ def dotplot_combined(genes: str, row_key: str, col_key: str) -> str:
         logger.exception("Combined dot plot failed")
         if combined_key in adata.obs.columns:
             del adata.obs[combined_key]
-        return f"Unexpected error: {e}"
+        return f"Error: Unexpected — {e}"
 
 
 @tool
@@ -408,7 +408,7 @@ def dotplot_matrix(genes: str, cell_type_key: str, condition_key: str) -> str:
         return f"Error: {e}"
     except Exception as e:
         logger.exception("Matrix dot plot failed")
-        return f"Unexpected error: {e}"
+        return f"Error: Unexpected — {e}"
 
 
 @tool
@@ -432,7 +432,7 @@ def feature_plot(gene: str, split_by: str = "") -> str:
         return f"Error: {e}"
     except Exception as e:
         logger.exception("Feature plot failed")
-        return f"Unexpected error: {e}"
+        return f"Error: Unexpected — {e}"
 
 
 @tool
@@ -461,7 +461,7 @@ def heatmap_plot(genes: str, groupby: str = "", n_genes_per_cluster: int = 0) ->
         return f"Error: {e}"
     except Exception as e:
         logger.exception("Heatmap plot failed")
-        return f"Unexpected error: {e}"
+        return f"Error: Unexpected — {e}"
 
 
 @tool
@@ -483,7 +483,7 @@ def scatter_plot(gene_x: str, gene_y: str, color_by: str = "") -> str:
         return f"Error: {e}"
     except Exception as e:
         logger.exception("Scatter plot failed")
-        return f"Unexpected error: {e}"
+        return f"Error: Unexpected — {e}"
 
 
 @tool
@@ -600,7 +600,7 @@ def inspect_metadata(max_unique_values: int = 50) -> str:
 
     except Exception as e:
         logger.exception("Metadata inspection failed")
-        return f"Error inspecting metadata: {e}"
+        return f"Error: Inspecting metadata — {e}"
 
 
 @tool
@@ -702,7 +702,7 @@ def composition_analysis(
         return f"Error: {e}"
     except Exception as e:
         logger.exception("Composition analysis failed")
-        return f"Unexpected error: {e}"
+        return f"Error: Unexpected — {e}"
 
 
 @tool
@@ -754,7 +754,7 @@ def preprocess_data(
         return result.message
     except Exception as e:
         logger.exception("Preprocessing failed")
-        return f"Preprocessing error: {e}"
+        return f"Error: Preprocessing — {e}"
 
 
 @tool
@@ -805,7 +805,7 @@ def differential_expression(groupby: str = "", method: str = "wilcoxon", n_genes
         return f"Error: {e}"
     except Exception as e:
         logger.exception("Marker gene analysis failed")
-        return f"Marker gene analysis error: {e}"
+        return f"Error: Marker gene analysis — {e}"
 
 
 @tool
@@ -878,7 +878,7 @@ def get_cluster_degs(
         return f"Error: {e}"
     except Exception as e:
         logger.exception("Cluster DEG analysis failed")
-        return f"Cluster DEG analysis error: {e}"
+        return f"Error: Cluster DEG analysis — {e}"
 
 
 @tool
@@ -943,7 +943,7 @@ def compare_groups_de(
         return f"Error: {e}"
     except Exception as e:
         logger.exception("Pairwise DE analysis failed")
-        return f"Pairwise DE error: {e}"
+        return f"Error: Pairwise DE — {e}"
 
 
 @tool
@@ -987,7 +987,7 @@ def get_top_markers(n_genes_per_cluster: int = 10, groupby: str = "") -> str:
         return f"Error: {e}"
     except Exception as e:
         logger.exception("Get top markers failed")
-        return f"Unexpected error: {e}"
+        return f"Error: Unexpected — {e}"
 
 
 @tool
@@ -1030,7 +1030,7 @@ def calculate_mito_pct() -> str:
         )
     except Exception as e:
         logger.exception("Calculate mito percentage failed")
-        return f"Error calculating mitochondrial percentage: {e}"
+        return f"Error: Calculating mitochondrial percentage — {e}"
 
 
 @tool
@@ -1104,7 +1104,7 @@ def summarize_obs_column(column_name: str) -> str:
         return f"Error: {e}"
     except Exception as e:
         logger.exception("Summarize obs column failed")
-        return f"Unexpected error: {e}"
+        return f"Error: Unexpected — {e}"
 
 
 @tool
@@ -1145,7 +1145,7 @@ def summarize_qc_metrics_tool() -> str:
         return f"Error: {e}"
     except Exception as e:
         logger.exception("Summarize QC metrics failed")
-        return f"Unexpected error: {e}"
+        return f"Error: Unexpected — {e}"
 
 
 @tool
@@ -1295,7 +1295,7 @@ print(de_results.head())
         return f"Error: {e}"
     except Exception as e:
         logger.exception("Get DE results table failed")
-        return f"Unexpected error: {e}"
+        return f"Error: Unexpected — {e}"
 
 
 @tool
@@ -1397,7 +1397,7 @@ print(de_results.head())
         return f"Error: {e}"
     except Exception as e:
         logger.exception("Get pairwise DE table failed")
-        return f"Unexpected error: {e}"
+        return f"Error: Unexpected — {e}"
 
 
 @tool
@@ -1441,7 +1441,7 @@ def get_cluster_mapping(groupby: str = "") -> str:
         return f"Error: {e}"
     except Exception as e:
         logger.exception("Get cluster mapping failed")
-        return f"Unexpected error: {e}"
+        return f"Error: Unexpected — {e}"
 
 
 @tool

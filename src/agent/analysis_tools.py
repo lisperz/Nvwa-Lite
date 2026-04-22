@@ -97,7 +97,7 @@ def calculate_average_expression(gene: str, groupby: str = "") -> str:
         return f"Error: {e}"
     except Exception as e:
         logger.exception("Calculate average expression failed")
-        return f"Unexpected error: {e}"
+        return f"Error: Unexpected — {e}"
 
 
 @tool
@@ -165,7 +165,7 @@ def find_highest_expression(gene: str, groupby: str = "") -> str:
         return f"Error: {e}"
     except Exception as e:
         logger.exception("Find highest expression failed")
-        return f"Unexpected error: {e}"
+        return f"Error: Unexpected — {e}"
 
 
 @tool
@@ -236,7 +236,7 @@ def highlight_cluster(cluster_id: str, color_by: str = "") -> str:
         return f"Error: {e}"
     except Exception as e:
         logger.exception("Highlight cluster failed")
-        return f"Unexpected error: {e}"
+        return f"Error: Unexpected — {e}"
 
 
 @tool
@@ -286,7 +286,7 @@ def rename_cluster(old_name: str, new_name: str, groupby: str = "") -> str:
         return f"Error: {e}"
     except Exception as e:
         logger.exception("Rename cluster failed")
-        return f"Unexpected error: {e}"
+        return f"Error: Unexpected — {e}"
 
 
 def get_analysis_tools() -> list:

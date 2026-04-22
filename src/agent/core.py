@@ -43,6 +43,21 @@ class AgentResponse:
     tool_called: bool
 
 
+def _classify_tool_status(result: object) -> tuple[str, str | None]:
+    """Infer (status, error_msg) from a tool return value.
+
+    Contract: tool error returns must start with ``Error:`` (capital E).
+    See ``src/agent/tools.py`` and related tool modules for canonicalized
+    prefixes.
+    """
+    if not isinstance(result, str):
+        return ("success", None)
+    first_line = result.lstrip().split("\n", 1)[0][:200]
+    if first_line.startswith("Error:"):
+        return ("error", first_line)
+    return ("success", None)
+
+
 def create_agent(
     adata: AnnData,
     api_key: str,
@@ -286,7 +301,8 @@ class AgentRunner:
                             result = tool_fn.invoke(tool_args)
                             tool_duration = time.time() - tool_start
 
-                            # Log successful tool execution
+                            status, error_msg = _classify_tool_status(result)
+
                             if self._event_logger and self._user_id and self._session_id:
                                 self._event_logger.log_tool_execution(
                                     user_id=self._user_id,
@@ -295,9 +311,10 @@ class AgentRunner:
                                     args=tool_args,
                                     result=str(result),
                                     duration_ms=tool_duration * 1000,
-                                    status="success",
+                                    status=status,
                                     turn_id=turn_id,
                                     call_index=call_index,
+                                    error=error_msg,
                                 )
                             if self._db_logger and self._user_id and self._session_id:
                                 self._db_logger.log_tool_execution(
@@ -307,7 +324,7 @@ class AgentRunner:
                                     args=tool_args,
                                     result=str(result),
                                     duration_ms=tool_duration * 1000,
-                                    status="success",
+                                    status=status,
                                     turn_id=turn_id,
                                     call_index=call_index,
                                 )

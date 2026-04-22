@@ -95,6 +95,7 @@ class EventLogger:
         error_stacktrace: str | None = None,
         turn_id: str | None = None,
         call_index: int | None = None,
+        error: str | None = None,
     ) -> None:
         """Log a tool execution event.
 
@@ -109,6 +110,8 @@ class EventLogger:
             error_stacktrace: Full traceback on error, None on success.
             turn_id: UUID for the current turn (links tool calls to the user message).
             call_index: 1-based index of this tool call within the turn.
+            error: Short error message (first line of the error string) for
+                classifier-inferred errors that have no stacktrace.
         """
         payload: dict[str, Any] = {
             "args": args,
@@ -122,6 +125,8 @@ class EventLogger:
             payload["call_index"] = call_index
         if error_stacktrace is not None:
             payload["error_stacktrace"] = error_stacktrace
+        if error is not None:
+            payload["error"] = error
         entry = LogEntry(
             timestamp=datetime.utcnow().isoformat() + "Z",
             user_id=user_id,

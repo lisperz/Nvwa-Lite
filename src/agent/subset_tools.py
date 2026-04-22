@@ -275,7 +275,7 @@ def subset_violin_plot(
         return f"Error: {e}"
     except Exception as e:
         logger.exception("Subset violin plot failed")
-        return f"Unexpected error: {e}"
+        return f"Error: Unexpected — {e}"
 
 
 @tool
@@ -378,7 +378,7 @@ def subset_feature_plot(
         return f"Error: {e}"
     except Exception as e:
         logger.exception("Subset feature plot failed")
-        return f"Unexpected error: {e}"
+        return f"Error: Unexpected — {e}"
 
 
 def get_subset_tools() -> list:
