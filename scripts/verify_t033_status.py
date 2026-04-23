@@ -59,9 +59,9 @@ def main() -> int:
         return 2
 
     from src.agent.core import create_agent
-    from src.analysis.h5ad_loader import load_h5ad
-    from src.logging import service as logging_service
-    from src.types import detect_dataset_state
+    from src.domain.analysis.h5ad_loader import load_h5ad
+    from src.platform.observability import events as logging_service
+    from src.core.types import detect_dataset_state
 
     _reset_event_logger_handlers()
 

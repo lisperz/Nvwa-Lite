@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from anndata import AnnData
-    from src.types import DatasetState
+    from src.core.types import DatasetState
 
 SYSTEM_PROMPT_TEMPLATE = """\
 ## Identity

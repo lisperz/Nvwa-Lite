@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 import scanpy as sc
 from anndata import AnnData
 
-from src.plotting.validation import validate_gene, validate_obs_key, validate_obs_or_gene
+from src.core.adata_schema import validate_gene, validate_obs_key, validate_obs_or_gene
 
 logger = logging.getLogger(__name__)
 

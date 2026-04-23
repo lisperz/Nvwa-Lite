@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 import streamlit as st
 
 if TYPE_CHECKING:
-    from src.types import DatasetState
+    from src.core.types import DatasetState
 
 logger = logging.getLogger(__name__)
 
@@ -129,7 +129,7 @@ def file_upload_widget(user_id: str | None = None, session_id: str | None = None
             s3_key = None
             if user_id and session_id and os.getenv("S3_BUCKET_NAME"):
                 try:
-                    from src.storage.service import S3StorageService
+                    from src.platform.infra.storage import S3StorageService
                     s3_service = S3StorageService(
                         bucket_name=os.getenv("S3_BUCKET_NAME"),
                         region=os.getenv("AWS_REGION", "us-east-2")

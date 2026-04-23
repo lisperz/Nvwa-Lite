@@ -136,7 +136,7 @@ def _valid_table(t: Any) -> bool:
 
 def load_adata(dataset_path: Path) -> Any:
     """Load and return an AnnData, suppressing legacy format warnings."""
-    from src.analysis.h5ad_loader import load_h5ad
+    from src.domain.analysis.h5ad_loader import load_h5ad
     return load_h5ad(dataset_path)
 
 
@@ -161,7 +161,7 @@ def run_one(
     """
     from src.agent.core import create_agent
     from src.agent.tools import clear_plot_results, clear_table_results, get_plot_results, get_table_results
-    from src.types import detect_dataset_state
+    from src.core.types import detect_dataset_state
 
     try:
         from openai import RateLimitError as _RateLimitError
@@ -595,7 +595,7 @@ def main() -> int:
 
             # Pre-flight: dataset capability checks (cheap, no agent invocation).
             if tc.get("requires_precomputed_umap"):
-                from src.analysis.h5ad_loader import load_h5ad as _load_h5ad
+                from src.domain.analysis.h5ad_loader import load_h5ad as _load_h5ad
                 _adata_check = _load_h5ad(dataset_path)
                 if "X_umap" not in _adata_check.obsm:
                     result.status = "fail"

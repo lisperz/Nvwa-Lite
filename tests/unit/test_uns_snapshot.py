@@ -15,7 +15,7 @@ from unittest.mock import MagicMock
 import numpy as np
 import pandas as pd
 
-from src.logging.uns_snapshot import emit_uns_snapshot, snapshot_uns
+from src.platform.observability.uns_snapshot import emit_uns_snapshot, snapshot_uns
 
 
 def _fake_adata(uns: dict) -> SimpleNamespace:

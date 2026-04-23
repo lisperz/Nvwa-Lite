@@ -16,7 +16,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.logging.service import EventLogger
+from src.platform.observability.events import EventLogger
 
 
 @pytest.fixture(autouse=True)
@@ -145,7 +145,7 @@ class TestErrorStacktrace:
 
 class TestDatasetMetadata:
     def _make_db_logger(self):
-        from src.db.logger import DatabaseLogger
+        from src.platform.infra.db.logger import DatabaseLogger
         return DatabaseLogger()
 
     def _run_ensure_session(self, metadata):
@@ -164,7 +164,7 @@ class TestDatasetMetadata:
         mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cur)
         mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
 
-        with patch("src.db.logger.get_conn", return_value=mock_conn):
+        with patch("src.platform.infra.db.logger.get_conn", return_value=mock_conn):
             db.ensure_session("u1", "s1", "test.h5ad", dataset_metadata=metadata)
 
         return captured
@@ -212,7 +212,7 @@ class TestDatasetMetadata:
 
 class TestEndReason:
     def _run_end_session(self, reason):
-        from src.db.logger import DatabaseLogger
+        from src.platform.infra.db.logger import DatabaseLogger
         db = DatabaseLogger()
         captured = {}
 
@@ -227,7 +227,7 @@ class TestEndReason:
         mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cur)
         mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
 
-        with patch("src.db.logger.get_conn", return_value=mock_conn):
+        with patch("src.platform.infra.db.logger.get_conn", return_value=mock_conn):
             db.end_session("s1", end_reason=reason)
 
         return captured
@@ -238,7 +238,7 @@ class TestEndReason:
         assert captured["params"][0] == reason
 
     def test_default_end_reason_is_normal(self):
-        from src.db.logger import DatabaseLogger
+        from src.platform.infra.db.logger import DatabaseLogger
         db = DatabaseLogger()
         captured = {}
 
@@ -253,7 +253,7 @@ class TestEndReason:
         mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cur)
         mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
 
-        with patch("src.db.logger.get_conn", return_value=mock_conn):
+        with patch("src.platform.infra.db.logger.get_conn", return_value=mock_conn):
             db.end_session("s1")  # no reason arg
 
         assert captured["params"][0] == "normal"

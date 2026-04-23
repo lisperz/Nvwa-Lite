@@ -6,7 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.db.client import get_conn
+from src.platform.infra.db.client import get_conn
 
 def run_migration(sql_file: Path) -> None:
     """Execute a SQL migration file."""

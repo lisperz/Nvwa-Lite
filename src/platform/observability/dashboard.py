@@ -19,7 +19,7 @@ if _PROJECT_ROOT not in sys.path:
 import pandas as pd
 import streamlit as st
 
-import src.monitoring.analytics as analytics
+import src.platform.observability.analytics as analytics
 
 # ---------------------------------------------------------------------------
 # Logging

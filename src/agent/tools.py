@@ -16,23 +16,23 @@ from langchain_core.tools import tool
 from src.agent import analysis_tools
 from src.agent import subset_tools
 from src.agent.viz_state import update_viz_state
-from src.analysis.calculations import calculate_mito_percentage, get_metadata_summary
-from src.analysis.gene_lookup import lookup_gene_name
-from src.analysis.composition import cross_tabulate_metadata
-from src.analysis.differential import get_de_dataframe, run_differential_expression, run_pairwise_de, get_all_de_results
-from src.analysis.marker_genes import get_top_marker_genes_per_cluster
-from src.analysis.preprocessing import run_preprocessing
-from src.analysis.qc_metrics import get_obs_column_statistics, resolve_qc_metric_column, summarize_qc_metrics
-from src.logging.uns_snapshot import emit_uns_snapshot
-from src.plotting.comparison import plot_dotplot, plot_heatmap, plot_scatter
-from src.plotting.composition import plot_composition
-from src.plotting.executor import PlotResult, TableResult, plot_feature, plot_umap, plot_violin
-from src.plotting.volcano import plot_volcano
-from src.types import DatasetState, detect_dataset_state
+from src.domain.analysis.calculations import calculate_mito_percentage, get_metadata_summary
+from src.domain.analysis.gene_lookup import lookup_gene_name
+from src.domain.analysis.composition import cross_tabulate_metadata
+from src.domain.analysis.differential import get_de_dataframe, run_differential_expression, run_pairwise_de, get_all_de_results
+from src.domain.analysis.marker_genes import get_top_marker_genes_per_cluster
+from src.domain.analysis.preprocessing import run_preprocessing
+from src.domain.analysis.qc_metrics import get_obs_column_statistics, resolve_qc_metric_column, summarize_qc_metrics
+from src.platform.observability.uns_snapshot import emit_uns_snapshot
+from src.domain.plotting.comparison import plot_dotplot, plot_heatmap, plot_scatter
+from src.domain.plotting.composition import plot_composition
+from src.domain.plotting.executor import PlotResult, TableResult, plot_feature, plot_umap, plot_violin
+from src.domain.plotting.volcano import plot_volcano
+from src.core.types import DatasetState, detect_dataset_state
 
 if TYPE_CHECKING:
     from anndata import AnnData
-    from src.logging.service import EventLogger
+    from src.platform.observability.events import EventLogger
 
 logger = logging.getLogger(__name__)
 
@@ -842,7 +842,7 @@ def get_cluster_degs(
         Summary message with DEG results. Results are stored and can be accessed
         via get_de_results_table.
     """
-    from src.analysis.cluster_resolution import resolve_analysis_scope
+    from src.domain.analysis.cluster_resolution import resolve_analysis_scope
 
     adata = _get_adata()
 
@@ -963,7 +963,7 @@ def get_top_markers(n_genes_per_cluster: int = 10, groupby: str = "") -> str:
         groupby = _get_cluster_key()
 
     try:
-        from src.analysis.marker_genes import get_top_marker_genes_per_cluster_exact
+        from src.domain.analysis.marker_genes import get_top_marker_genes_per_cluster_exact
 
         cluster_genes = get_top_marker_genes_per_cluster_exact(
             adata, n_genes=n_genes_per_cluster, groupby=groupby
@@ -1183,7 +1183,7 @@ def get_de_results_table(
     Returns:
         Summary message. The full table will be available for download in the UI.
     """
-    from src.analysis.cluster_resolution import resolve_analysis_scope
+    from src.domain.analysis.cluster_resolution import resolve_analysis_scope
 
     adata = _get_adata()
 
@@ -1415,7 +1415,7 @@ def get_cluster_mapping(groupby: str = "") -> str:
     Returns:
         A formatted mapping showing numeric index -> cluster/cell type name.
     """
-    from src.analysis.cluster_resolution import create_cluster_index_mapping
+    from src.domain.analysis.cluster_resolution import create_cluster_index_mapping
 
     adata = _get_adata()
 

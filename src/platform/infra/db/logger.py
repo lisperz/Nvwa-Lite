@@ -11,7 +11,7 @@ import logging
 from datetime import datetime
 from typing import Any
 
-from src.db.client import get_conn
+from src.platform.infra.db.client import get_conn
 
 logger = logging.getLogger(__name__)
 
@@ -205,7 +205,7 @@ class DatabaseLogger:
         s3_service = None
         if os.getenv("S3_BUCKET_NAME"):
             try:
-                from src.storage.service import S3StorageService
+                from src.platform.infra.storage import S3StorageService
                 s3_service = S3StorageService(
                     bucket_name=os.getenv("S3_BUCKET_NAME"),
                     region=os.getenv("AWS_REGION", "us-east-2")

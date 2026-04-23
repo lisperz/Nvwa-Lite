@@ -8,7 +8,7 @@ import scanpy as sc
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.analysis.cluster_resolution import create_cluster_index_mapping
+from src.domain.analysis.cluster_resolution import create_cluster_index_mapping
 
 
 def main():

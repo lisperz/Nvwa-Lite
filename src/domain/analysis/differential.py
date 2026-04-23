@@ -12,7 +12,7 @@ import pandas as pd
 import scanpy as sc
 from anndata import AnnData
 
-from src.analysis.cluster_resolution import resolve_pairwise_groups
+from src.domain.analysis.cluster_resolution import resolve_pairwise_groups
 
 logger = logging.getLogger(__name__)
 

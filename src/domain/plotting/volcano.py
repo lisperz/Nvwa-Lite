@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from src.plotting.executor import PlotResult
+from src.domain.plotting.executor import PlotResult
 
 logger = logging.getLogger(__name__)
 

@@ -135,11 +135,11 @@ def _detect_condition_column(adata: "AnnData") -> str | None:
 def discover_profile(adata: "AnnData", name: str = "unknown") -> DatasetProfile:
     """Auto-discover a DatasetProfile from any AnnData object.
 
-    Uses existing detection functions from src.analysis to avoid duplicating logic.
+    Uses existing detection functions from src.domain.analysis to avoid duplicating logic.
     """
-    from src.analysis.cluster_resolution import detect_grouping_columns
-    from src.analysis.qc_metrics import resolve_qc_metric_column
-    from src.types import detect_dataset_state
+    from src.domain.analysis.cluster_resolution import detect_grouping_columns
+    from src.domain.analysis.qc_metrics import resolve_qc_metric_column
+    from src.core.types import detect_dataset_state
 
     state = detect_dataset_state(adata, filename=name)
     grouping = detect_grouping_columns(adata)
@@ -204,7 +204,7 @@ def adata():
 
     Session-scoped so the h5ad file is read only once across all test files.
     """
-    from src.analysis.h5ad_loader import load_h5ad
+    from src.domain.analysis.h5ad_loader import load_h5ad
 
     if not DATASET_PATH.exists():
         pytest.skip(f"Dataset not found: {DATASET_PATH}")
@@ -231,7 +231,7 @@ def adata_with_de(adata, profile):
     Session-scoped so DE is only computed once regardless of how many test
     files import this fixture.
     """
-    from src.analysis.differential import run_differential_expression
+    from src.domain.analysis.differential import run_differential_expression
 
     adata_copy = adata.copy()
     run_differential_expression(adata_copy, groupby=profile.primary_groupby, n_genes=20)

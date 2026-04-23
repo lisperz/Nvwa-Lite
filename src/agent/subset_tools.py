@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 from langchain_core.tools import tool
 
 from src.agent.viz_state import update_viz_state
-from src.plotting.executor import PlotResult, plot_feature, plot_violin
+from src.domain.plotting.executor import PlotResult, plot_feature, plot_violin
 
 if TYPE_CHECKING:
     from anndata import AnnData

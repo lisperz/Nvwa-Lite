@@ -5,7 +5,7 @@ import pandas as pd
 import pytest
 from anndata import AnnData
 
-from src.analysis.cluster_resolution import create_cluster_index_mapping
+from src.domain.analysis.cluster_resolution import create_cluster_index_mapping
 
 
 class TestCreateClusterIndexMapping:

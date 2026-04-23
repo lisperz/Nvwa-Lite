@@ -12,7 +12,7 @@ from threading import Thread
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from src.auth.service import AuthService
+    from src.platform.infra.auth import AuthService
     from src.session.manager import SessionManager
 
 logger = logging.getLogger(__name__)

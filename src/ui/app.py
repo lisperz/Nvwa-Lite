@@ -20,13 +20,13 @@ if _PROJECT_ROOT not in sys.path:
 import streamlit as st
 
 from src.agent.core import create_agent
-from src.analysis.h5ad_loader import load_h5ad
+from src.domain.analysis.h5ad_loader import load_h5ad
 from src.agent.tools import clear_plot_results, clear_table_results, get_plot_results, get_table_results, set_adata_replaced_callback, set_plot_generated_callback
 from src.agent.viz_state import VisualizationState, get_viz_state
-from src.auth.service import AuthService
-from src.plotting.styles import configure_plot_style
+from src.platform.infra.auth import AuthService
+from src.domain.plotting.styles import configure_plot_style
 from src.session.manager import SessionManager
-from src.types import DatasetState, detect_dataset_state
+from src.core.types import DatasetState, detect_dataset_state
 from src.ui.components import (
     example_queries,
     file_upload_widget,
@@ -35,7 +35,7 @@ from src.ui.components import (
 )
 from src.ui.feedback_dialog import show_feedback_dialog
 from src.ui.feedback_trigger import init_feedback_timer, mark_plot_generated, check_feedback_timer
-from src.db.logger import DatabaseLogger
+from src.platform.infra.db.logger import DatabaseLogger
 
 # ---------------------------------------------------------------------------
 # Logging setup

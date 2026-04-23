@@ -25,12 +25,12 @@ from src.agent.prompts import build_system_prompt
 from src.agent.router import classify_intent
 from src.agent.tools import bind_dataset, bind_dataset_state, bind_logger, get_all_tools
 from src.agent.viz_state import VisualizationState, bind_viz_state
-from src.db.logger import DatabaseLogger
-from src.logging.service import EventLogger
+from src.platform.infra.db.logger import DatabaseLogger
+from src.platform.observability.events import EventLogger
 
 if TYPE_CHECKING:
     from anndata import AnnData
-    from src.types import DatasetState
+    from src.core.types import DatasetState
 
 logger = logging.getLogger(__name__)
 

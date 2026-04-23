@@ -14,13 +14,13 @@ import matplotlib.pyplot as plt
 import numpy as np
 from langchain_core.tools import tool
 
-from src.analysis.calculations import (
+from src.domain.analysis.calculations import (
     calculate_cluster_averages,
     find_top_expressing_cluster,
     get_cluster_cell_indices,
     rename_cluster_labels,
 )
-from src.plotting.executor import PlotResult
+from src.domain.plotting.executor import PlotResult
 
 if TYPE_CHECKING:
     from anndata import AnnData

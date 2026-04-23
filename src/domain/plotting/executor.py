@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt
 import scanpy as sc
 from anndata import AnnData
 
-from src.plotting.validation import gene_exists, validate_gene, validate_obs_key
+from src.core.adata_schema import gene_exists, validate_gene, validate_obs_key
 
 logger = logging.getLogger(__name__)
 

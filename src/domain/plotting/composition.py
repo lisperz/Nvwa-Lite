@@ -13,8 +13,8 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from anndata import AnnData
 
-from src.analysis.composition import cross_tabulate_metadata
-from src.plotting.executor import PlotResult
+from src.domain.analysis.composition import cross_tabulate_metadata
+from src.domain.plotting.executor import PlotResult
 
 logger = logging.getLogger(__name__)
 

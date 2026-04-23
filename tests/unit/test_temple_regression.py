@@ -75,19 +75,19 @@ class TestTempleExactCounts:
 
     def test_cross_tabulate_shape(self, adata):
         """cell_type × orig.ident produces (12, 8) table."""
-        from src.analysis.composition import cross_tabulate_metadata
+        from src.domain.analysis.composition import cross_tabulate_metadata
         ct = cross_tabulate_metadata(adata, row_key=_TEMPLE_CELL_TYPE_COL, col_key=_TEMPLE_CONDITION_COL)
         assert ct.shape == (_TEMPLE_N_CELL_TYPES, _TEMPLE_N_CONDITIONS)
 
     def test_cross_tabulate_total_cells(self, adata):
         """Sum of all cells in crosstab equals 45,460."""
-        from src.analysis.composition import cross_tabulate_metadata
+        from src.domain.analysis.composition import cross_tabulate_metadata
         ct = cross_tabulate_metadata(adata, row_key=_TEMPLE_CELL_TYPE_COL, col_key=_TEMPLE_CONDITION_COL)
         assert ct.sum().sum() == _TEMPLE_N_CELLS
 
     def test_early_cardiomyocyte_count(self, adata):
         """Early cardiomyocyte row sums to exactly 10,234."""
-        from src.analysis.composition import cross_tabulate_metadata
+        from src.domain.analysis.composition import cross_tabulate_metadata
         ct = cross_tabulate_metadata(adata, row_key=_TEMPLE_CELL_TYPE_COL, col_key=_TEMPLE_CONDITION_COL)
         assert ct.loc["Early cardiomyocyte"].sum() == _TEMPLE_EARLY_CARDIO_COUNT
 
@@ -100,7 +100,7 @@ class TestTempleBiology:
 
     def test_tnnt2_highest_in_cardiomyocyte(self, adata):
         """TNNT2 highest expression is in a cardiomyocyte cell type."""
-        from src.analysis.calculations import find_top_expressing_cluster
+        from src.domain.analysis.calculations import find_top_expressing_cluster
         cluster, _ = find_top_expressing_cluster(adata, gene="TNNT2", groupby=_TEMPLE_CELL_TYPE_COL)
         assert "cardiomyocyte" in cluster.lower(), (
             f"Expected a cardiomyocyte cell type for TNNT2, got: '{cluster}'"
@@ -113,7 +113,7 @@ class TestTempleBiology:
 
     def test_qc_mito_stats(self, adata):
         """percent.mito mean matches known Temple value (~7.31)."""
-        from src.analysis.qc_metrics import get_obs_column_statistics
+        from src.domain.analysis.qc_metrics import get_obs_column_statistics
         stats = get_obs_column_statistics(adata, "percent.mito")
         assert stats["n_cells"] == _TEMPLE_N_CELLS
         assert abs(stats["mean"] - 7.31) < 0.5
@@ -138,7 +138,7 @@ class TestCEOBugRegressions:
         CEO test A4: same query returned 45,460 vs 43,915 on two runs.
         Root cause was state contamination between test runs.
         """
-        from src.analysis.composition import cross_tabulate_metadata
+        from src.domain.analysis.composition import cross_tabulate_metadata
 
         result1 = cross_tabulate_metadata(adata, row_key=_TEMPLE_CELL_TYPE_COL, col_key=_TEMPLE_CONDITION_COL)
         result2 = cross_tabulate_metadata(adata, row_key=_TEMPLE_CELL_TYPE_COL, col_key=_TEMPLE_CONDITION_COL)
@@ -156,7 +156,7 @@ class TestCEOBugRegressions:
         Note: Early cardiomyocyte subset only contains D10/D14 timepoints,
         not D5. We use the conditions that actually exist in this subset.
         """
-        from src.analysis.differential import run_pairwise_de
+        from src.domain.analysis.differential import run_pairwise_de
 
         adata_sub = adata[adata.obs[_TEMPLE_CELL_TYPE_COL] == "Early cardiomyocyte"].copy()
         available = adata_sub.obs[_TEMPLE_CONDITION_COL].unique().tolist()
@@ -180,7 +180,7 @@ class TestCEOBugRegressions:
         CEO test C6: asked for top 3 per cell type; returned 3 global genes
         (TGFBI, S100A11, IGFBP7) instead of per-cell-type lists.
         """
-        from src.analysis.marker_genes import get_top_marker_genes_per_cluster_exact
+        from src.domain.analysis.marker_genes import get_top_marker_genes_per_cluster_exact
 
         result = get_top_marker_genes_per_cluster_exact(
             adata_with_de, n_genes=3, groupby=_TEMPLE_CELL_TYPE_COL
@@ -200,7 +200,7 @@ class TestCEOBugRegressions:
         CEO test C1: asked which cell type expresses MKI67 highest;
         returned cluster IDs ("0", "Cluster 3") instead of cell type names.
         """
-        from src.analysis.calculations import find_top_expressing_cluster
+        from src.domain.analysis.calculations import find_top_expressing_cluster
 
         cluster, _ = find_top_expressing_cluster(adata, gene="MKI67", groupby=_TEMPLE_CELL_TYPE_COL)
 
@@ -220,7 +220,7 @@ class TestTemplePlots:
 
     def test_umap_by_cell_type(self, adata, plot_dir):
         """plot_umap colored by cell_type returns valid PNG."""
-        from src.plotting.executor import plot_umap
+        from src.domain.plotting.executor import plot_umap
         result = plot_umap(adata, color=_TEMPLE_CELL_TYPE_COL)
         assert valid_png(result.image)
         if _SAVE_PLOTS:
@@ -228,7 +228,7 @@ class TestTemplePlots:
 
     def test_violin_tnnt2_by_cell_type(self, adata, plot_dir):
         """plot_violin for TNNT2 grouped by cell_type returns valid PNG."""
-        from src.plotting.executor import plot_violin
+        from src.domain.plotting.executor import plot_violin
         result = plot_violin(adata, genes=["TNNT2"], groupby=_TEMPLE_CELL_TYPE_COL)
         assert valid_png(result.image)
         if _SAVE_PLOTS:
@@ -236,7 +236,7 @@ class TestTemplePlots:
 
     def test_feature_tnnt2(self, adata, plot_dir):
         """plot_feature for TNNT2 returns valid PNG."""
-        from src.plotting.executor import plot_feature
+        from src.domain.plotting.executor import plot_feature
         result = plot_feature(adata, gene="TNNT2")
         assert valid_png(result.image)
         if _SAVE_PLOTS:
@@ -244,7 +244,7 @@ class TestTemplePlots:
 
     def test_feature_tnnt2_split_by_condition(self, adata, plot_dir):
         """plot_feature for TNNT2 split by condition produces multi-panel PNG."""
-        from src.plotting.executor import plot_feature
+        from src.domain.plotting.executor import plot_feature
         result = plot_feature(adata, gene="TNNT2", split_by=_TEMPLE_CONDITION_COL)
         assert valid_png(result.image)
         assert "split" in result.message.lower()
@@ -256,7 +256,7 @@ class TestTemplePlots:
 
         CEO test B1: agent removed labels but claimed success.
         """
-        from src.plotting.executor import plot_umap
+        from src.domain.plotting.executor import plot_umap
         with_legend = plot_umap(adata, color=_TEMPLE_CELL_TYPE_COL, show_legend=True)
         without_legend = plot_umap(adata, color=_TEMPLE_CELL_TYPE_COL, show_legend=False)
         assert valid_png(with_legend.image)
@@ -271,7 +271,7 @@ class TestTemplePlots:
 
         CEO test B2: split_by and color_by treated as the same parameter.
         """
-        from src.plotting.executor import plot_umap
+        from src.domain.plotting.executor import plot_umap
         result = plot_umap(adata, color=_TEMPLE_CELL_TYPE_COL, split_by=_TEMPLE_CONDITION_COL)
         assert valid_png(result.image)
         if _SAVE_PLOTS:

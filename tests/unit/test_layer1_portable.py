@@ -27,12 +27,12 @@ class TestQCMetrics:
 
     def test_resolve_unknown_metric_returns_none(self, adata):
         """Unknown metric name returns None, not an error."""
-        from src.analysis.qc_metrics import resolve_qc_metric_column
+        from src.domain.analysis.qc_metrics import resolve_qc_metric_column
         assert resolve_qc_metric_column(adata, "nonexistent_metric_xyz_abc") is None
 
     def test_resolve_known_metric_returns_string(self, adata, profile):
         """Any discovered QC column resolves to a non-empty string."""
-        from src.analysis.qc_metrics import resolve_qc_metric_column
+        from src.domain.analysis.qc_metrics import resolve_qc_metric_column
         col = profile.qc_counts_column or profile.qc_mito_column or profile.qc_genes_column
         if col is None:
             pytest.skip("No QC columns found in this dataset")
@@ -41,7 +41,7 @@ class TestQCMetrics:
 
     def test_obs_statistics_n_cells_matches_dataset(self, adata, profile):
         """Statistics n_cells equals adata.n_obs."""
-        from src.analysis.qc_metrics import get_obs_column_statistics
+        from src.domain.analysis.qc_metrics import get_obs_column_statistics
         col = profile.qc_counts_column or profile.qc_mito_column or profile.qc_genes_column
         if col is None:
             pytest.skip("No numeric QC column found")
@@ -50,7 +50,7 @@ class TestQCMetrics:
 
     def test_obs_statistics_mean_in_range(self, adata, profile):
         """Mean is between min and max."""
-        from src.analysis.qc_metrics import get_obs_column_statistics
+        from src.domain.analysis.qc_metrics import get_obs_column_statistics
         col = profile.qc_counts_column or profile.qc_mito_column or profile.qc_genes_column
         if col is None:
             pytest.skip("No numeric QC column found")
@@ -59,7 +59,7 @@ class TestQCMetrics:
 
     def test_obs_statistics_quartiles_ordered(self, adata, profile):
         """q25 <= median <= q75."""
-        from src.analysis.qc_metrics import get_obs_column_statistics
+        from src.domain.analysis.qc_metrics import get_obs_column_statistics
         col = profile.qc_counts_column or profile.qc_mito_column or profile.qc_genes_column
         if col is None:
             pytest.skip("No numeric QC column found")
@@ -68,14 +68,14 @@ class TestQCMetrics:
 
     def test_obs_statistics_invalid_column_raises(self, adata):
         """Non-existent column raises ValueError."""
-        from src.analysis.qc_metrics import get_obs_column_statistics
+        from src.domain.analysis.qc_metrics import get_obs_column_statistics
         with pytest.raises(ValueError):
             get_obs_column_statistics(adata, "nonexistent_col_xyz")
 
     def test_summarize_qc_returns_dataframe(self, adata, profile):
         """summarize_qc_metrics returns a non-empty DataFrame with expected columns."""
         import pandas as pd
-        from src.analysis.qc_metrics import summarize_qc_metrics
+        from src.domain.analysis.qc_metrics import summarize_qc_metrics
         cols = [c for c in [profile.qc_counts_column, profile.qc_genes_column, profile.qc_mito_column] if c]
         if not cols:
             pytest.skip("No QC columns found in this dataset")
@@ -94,7 +94,7 @@ class TestComposition:
 
     def test_cross_tabulate_sum_equals_n_cells(self, adata, profile):
         """Cross-tabulation total equals dataset cell count."""
-        from src.analysis.composition import cross_tabulate_metadata
+        from src.domain.analysis.composition import cross_tabulate_metadata
         if not profile.cell_type_column or not profile.condition_column:
             pytest.skip("Need both cell type and condition columns")
         ct = cross_tabulate_metadata(adata, row_key=profile.cell_type_column, col_key=profile.condition_column)
@@ -102,7 +102,7 @@ class TestComposition:
 
     def test_cross_tabulate_shape_matches_uniques(self, adata, profile):
         """Shape matches unique value counts of each column."""
-        from src.analysis.composition import cross_tabulate_metadata
+        from src.domain.analysis.composition import cross_tabulate_metadata
         if not profile.cell_type_column or not profile.condition_column:
             pytest.skip("Need both cell type and condition columns")
         ct = cross_tabulate_metadata(adata, row_key=profile.cell_type_column, col_key=profile.condition_column)
@@ -112,7 +112,7 @@ class TestComposition:
 
     def test_cross_tabulate_no_negative_values(self, adata, profile):
         """All cell counts are non-negative."""
-        from src.analysis.composition import cross_tabulate_metadata
+        from src.domain.analysis.composition import cross_tabulate_metadata
         if not profile.cell_type_column or not profile.condition_column:
             pytest.skip("Need both cell type and condition columns")
         ct = cross_tabulate_metadata(adata, row_key=profile.cell_type_column, col_key=profile.condition_column)
@@ -120,14 +120,14 @@ class TestComposition:
 
     def test_cross_tabulate_invalid_key_raises(self, adata, profile):
         """Invalid row_key raises ValueError."""
-        from src.analysis.composition import cross_tabulate_metadata
+        from src.domain.analysis.composition import cross_tabulate_metadata
         col = profile.cell_type_column or profile.cluster_column or adata.obs.columns[0]
         with pytest.raises(ValueError):
             cross_tabulate_metadata(adata, row_key="nonexistent_col_xyz", col_key=col)
 
     def test_cross_tabulate_same_query_idempotent(self, adata, profile):
         """Running the same query twice returns identical results (state isolation)."""
-        from src.analysis.composition import cross_tabulate_metadata
+        from src.domain.analysis.composition import cross_tabulate_metadata
         if not profile.cell_type_column or not profile.condition_column:
             pytest.skip("Need both cell type and condition columns")
         r1 = cross_tabulate_metadata(adata, row_key=profile.cell_type_column, col_key=profile.condition_column)
@@ -144,14 +144,14 @@ class TestDifferentialExpression:
 
     def test_run_de_returns_deresult(self, adata, profile):
         """run_differential_expression returns a DEResult."""
-        from src.analysis.differential import DEResult, run_differential_expression
+        from src.domain.analysis.differential import DEResult, run_differential_expression
         result = run_differential_expression(adata.copy(), groupby=profile.primary_groupby, n_genes=5)
         assert isinstance(result, DEResult)
 
     def test_run_de_result_has_expected_columns(self, adata, profile):
         """Results DataFrame has gene, log2fc, pval, pval_adj columns."""
         import pandas as pd
-        from src.analysis.differential import run_differential_expression
+        from src.domain.analysis.differential import run_differential_expression
         result = run_differential_expression(adata.copy(), groupby=profile.primary_groupby, n_genes=5)
         assert isinstance(result.results_df, pd.DataFrame)
         for col in ("gene", "log2fc", "pval", "pval_adj"):
@@ -159,7 +159,7 @@ class TestDifferentialExpression:
 
     def test_run_de_genes_are_in_var_names(self, adata, profile):
         """All returned gene names exist in adata.var_names or adata.raw.var_names."""
-        from src.analysis.differential import run_differential_expression
+        from src.domain.analysis.differential import run_differential_expression
         result = run_differential_expression(adata.copy(), groupby=profile.primary_groupby, n_genes=5)
         raw_var_names = set(adata.raw.var_names) if adata.raw is not None else set()
         all_var_names = set(adata.var_names) | raw_var_names
@@ -168,13 +168,13 @@ class TestDifferentialExpression:
 
     def test_run_de_invalid_groupby_raises(self, adata):
         """Invalid groupby raises ValueError."""
-        from src.analysis.differential import run_differential_expression
+        from src.domain.analysis.differential import run_differential_expression
         with pytest.raises(ValueError):
             run_differential_expression(adata.copy(), groupby="nonexistent_col_xyz")
 
     def test_run_de_n_genes_zero_returns_all(self, adata, profile):
         """n_genes=0 sentinel returns all genes."""
-        from src.analysis.differential import run_differential_expression
+        from src.domain.analysis.differential import run_differential_expression
         groups = adata.obs[profile.primary_groupby].unique()
         first_group = str(groups[0])
         result = run_differential_expression(
@@ -184,7 +184,7 @@ class TestDifferentialExpression:
 
     def test_get_de_dataframe_no_results_raises(self, adata, profile):
         """get_de_dataframe raises ValueError when no DE has been run."""
-        from src.analysis.differential import get_de_dataframe
+        from src.domain.analysis.differential import get_de_dataframe
         groups = adata.obs[profile.primary_groupby].unique()
         with pytest.raises(ValueError):
             get_de_dataframe(adata.copy(), group=str(groups[0]))
@@ -192,7 +192,7 @@ class TestDifferentialExpression:
     def test_get_de_dataframe_after_run(self, adata_with_de, profile):
         """get_de_dataframe returns non-empty DataFrame after DE is run."""
         import pandas as pd
-        from src.analysis.differential import get_de_dataframe
+        from src.domain.analysis.differential import get_de_dataframe
         groups = adata_with_de.obs[profile.primary_groupby].unique()
         df = get_de_dataframe(adata_with_de, group=str(groups[0]))
         assert isinstance(df, pd.DataFrame)
@@ -201,7 +201,7 @@ class TestDifferentialExpression:
 
     def test_pairwise_de_returns_deresult(self, adata, profile):
         """Pairwise DE between two groups returns a valid DEResult."""
-        from src.analysis.differential import DEResult, run_pairwise_de
+        from src.domain.analysis.differential import DEResult, run_pairwise_de
         groups = adata.obs[profile.primary_groupby].unique()
         if len(groups) < 2:
             pytest.skip("Need at least 2 groups for pairwise DE")
@@ -222,7 +222,7 @@ class TestDifferentialExpression:
         Regression test for T-028 Bug B: run_pairwise_de called
         sc.tl.rank_genes_groups without key_added, destroying the default slot.
         """
-        from src.analysis.differential import run_differential_expression, run_pairwise_de
+        from src.domain.analysis.differential import run_differential_expression, run_pairwise_de
         groups = adata.obs[profile.primary_groupby].unique()
         if len(groups) < 2:
             pytest.skip("Need at least 2 groups for pairwise DE")
@@ -250,7 +250,7 @@ class TestDifferentialExpression:
         Regression test for T-028 Bug B: verifies the data (not just the keys)
         survives a subsequent pairwise DE call.
         """
-        from src.analysis.differential import (
+        from src.domain.analysis.differential import (
             get_de_dataframe, run_differential_expression, run_pairwise_de,
         )
         groups = adata.obs[profile.primary_groupby].unique()
@@ -279,7 +279,7 @@ class TestDifferentialExpression:
         Ensures each pairwise call writes to its own slot and the default
         rank_genes_groups (from a prior all-vs-rest) stays intact.
         """
-        from src.analysis.differential import run_differential_expression, run_pairwise_de
+        from src.domain.analysis.differential import run_differential_expression, run_pairwise_de
         groups = adata.obs[profile.primary_groupby].unique()
         if len(groups) < 3:
             pytest.skip("Need at least 3 groups for consecutive pairwise DE")
@@ -312,8 +312,8 @@ class TestDifferentialExpression:
         Regression test for T-028 Bug A: verifies the data path — pairwise DE
         produces a DataFrame that plot_volcano can consume.
         """
-        from src.analysis.differential import run_pairwise_de
-        from src.plotting.volcano import plot_volcano
+        from src.domain.analysis.differential import run_pairwise_de
+        from src.domain.plotting.volcano import plot_volcano
         groups = adata.obs[profile.primary_groupby].unique()
         if len(groups) < 2:
             pytest.skip("Need at least 2 groups for pairwise DE")
@@ -342,7 +342,7 @@ class TestMarkerGenes:
 
     def test_get_top_markers_per_cluster_returns_list(self, adata_with_de, profile):
         """get_top_marker_genes_per_cluster returns a non-empty list of strings."""
-        from src.analysis.marker_genes import get_top_marker_genes_per_cluster
+        from src.domain.analysis.marker_genes import get_top_marker_genes_per_cluster
         genes = get_top_marker_genes_per_cluster(adata_with_de, n_genes=3, groupby=profile.primary_groupby)
         assert isinstance(genes, list)
         assert len(genes) > 0
@@ -350,7 +350,7 @@ class TestMarkerGenes:
 
     def test_get_top_markers_are_valid_gene_names(self, adata_with_de, profile):
         """All returned marker genes exist in adata.var_names or adata.raw.var_names."""
-        from src.analysis.marker_genes import get_top_marker_genes_per_cluster
+        from src.domain.analysis.marker_genes import get_top_marker_genes_per_cluster
         genes = get_top_marker_genes_per_cluster(adata_with_de, n_genes=3, groupby=profile.primary_groupby)
         raw_var_names = set(adata_with_de.raw.var_names) if adata_with_de.raw is not None else set()
         all_var_names = set(adata_with_de.var_names) | raw_var_names
@@ -359,14 +359,14 @@ class TestMarkerGenes:
 
     def test_get_top_markers_count_bounded(self, adata_with_de, profile):
         """Top 3 per group yields at most n_groups * 3 unique genes."""
-        from src.analysis.marker_genes import get_top_marker_genes_per_cluster
+        from src.domain.analysis.marker_genes import get_top_marker_genes_per_cluster
         n_groups = adata_with_de.obs[profile.primary_groupby].nunique()
         genes = get_top_marker_genes_per_cluster(adata_with_de, n_genes=3, groupby=profile.primary_groupby)
         assert 1 <= len(genes) <= n_groups * 3
 
     def test_get_top_markers_exact_structure(self, adata_with_de, profile):
         """get_top_marker_genes_per_cluster_exact returns dict with one entry per group."""
-        from src.analysis.marker_genes import get_top_marker_genes_per_cluster_exact
+        from src.domain.analysis.marker_genes import get_top_marker_genes_per_cluster_exact
         n_groups = adata_with_de.obs[profile.primary_groupby].nunique()
         result = get_top_marker_genes_per_cluster_exact(adata_with_de, n_genes=3, groupby=profile.primary_groupby)
         assert isinstance(result, dict)
@@ -377,7 +377,7 @@ class TestMarkerGenes:
 
         Portable version of CEO bug C6 (top-N per cell type, not global).
         """
-        from src.analysis.marker_genes import get_top_marker_genes_per_cluster_exact
+        from src.domain.analysis.marker_genes import get_top_marker_genes_per_cluster_exact
         n_groups = adata_with_de.obs[profile.primary_groupby].nunique()
         if n_groups < 2:
             pytest.skip("Need at least 2 groups to check per-group diversity")
@@ -392,7 +392,7 @@ class TestMarkerGenes:
         tutorial h5ad files ship with DE results in uns).
         """
         import anndata as ad
-        from src.analysis.marker_genes import get_top_marker_genes_per_cluster
+        from src.domain.analysis.marker_genes import get_top_marker_genes_per_cluster
         fresh = ad.AnnData(X=adata.X, obs=adata.obs.copy(), var=adata.var.copy())
         with pytest.raises(ValueError):
             get_top_marker_genes_per_cluster(fresh, n_genes=3)
@@ -407,7 +407,7 @@ class TestCalculations:
     def test_calculate_cluster_averages_columns(self, adata, profile):
         """calculate_cluster_averages returns DataFrame with required columns."""
         import pandas as pd
-        from src.analysis.calculations import calculate_cluster_averages
+        from src.domain.analysis.calculations import calculate_cluster_averages
         gene = profile.sample_genes[0] if profile.sample_genes else None
         if gene is None:
             pytest.skip("No sample genes available")
@@ -418,7 +418,7 @@ class TestCalculations:
 
     def test_calculate_cluster_averages_cell_count_sum(self, adata, profile):
         """Cell counts in cluster averages sum to total n_cells."""
-        from src.analysis.calculations import calculate_cluster_averages
+        from src.domain.analysis.calculations import calculate_cluster_averages
         gene = profile.sample_genes[0] if profile.sample_genes else None
         if gene is None:
             pytest.skip("No sample genes available")
@@ -427,13 +427,13 @@ class TestCalculations:
 
     def test_calculate_cluster_averages_invalid_gene_raises(self, adata, profile):
         """Non-existent gene raises ValueError."""
-        from src.analysis.calculations import calculate_cluster_averages
+        from src.domain.analysis.calculations import calculate_cluster_averages
         with pytest.raises(ValueError):
             calculate_cluster_averages(adata, gene="FAKEGENE_XYZ_999", groupby=profile.primary_groupby)
 
     def test_find_top_expressing_cluster_returns_valid_group(self, adata, profile):
         """find_top_expressing_cluster returns a group that exists in the dataset."""
-        from src.analysis.calculations import find_top_expressing_cluster
+        from src.domain.analysis.calculations import find_top_expressing_cluster
         gene = profile.sample_genes[0] if profile.sample_genes else None
         if gene is None:
             pytest.skip("No sample genes available")
@@ -446,14 +446,14 @@ class TestCalculations:
 
     def test_get_cluster_statistics_percentages_sum(self, adata, profile):
         """Cluster percentages sum to approximately 100%."""
-        from src.analysis.calculations import get_cluster_statistics
+        from src.domain.analysis.calculations import get_cluster_statistics
         df = get_cluster_statistics(adata, groupby=profile.primary_groupby)
         assert abs(df["percentage"].sum() - 100.0) < 0.01
 
     def test_get_metadata_summary_returns_dataframe(self, adata):
         """get_metadata_summary returns a DataFrame with column_name column."""
         import pandas as pd
-        from src.analysis.calculations import get_metadata_summary
+        from src.domain.analysis.calculations import get_metadata_summary
         df = get_metadata_summary(adata)
         assert isinstance(df, pd.DataFrame)
         assert "column_name" in df.columns
@@ -463,7 +463,7 @@ class TestCalculations:
 
         Portable version of CEO bug C1 (MKI67 returned cluster ID instead of cell type).
         """
-        from src.analysis.calculations import find_top_expressing_cluster
+        from src.domain.analysis.calculations import find_top_expressing_cluster
         if not profile.cell_type_column:
             pytest.skip("No cell type annotation column found")
         gene = profile.sample_genes[0] if profile.sample_genes else None
@@ -485,7 +485,7 @@ class TestPlotting:
         """plot_umap colored by primary_groupby returns valid PNG."""
         if not profile.has_umap:
             pytest.skip("Dataset has no X_umap embedding")
-        from src.plotting.executor import PlotResult, plot_umap
+        from src.domain.plotting.executor import PlotResult, plot_umap
         result = plot_umap(adata, color=profile.primary_groupby)
         assert isinstance(result, PlotResult)
         assert valid_png(result.image)
@@ -498,7 +498,7 @@ class TestPlotting:
             pytest.skip("Dataset has no X_umap embedding")
         if not profile.sample_genes:
             pytest.skip("No sample genes available")
-        from src.plotting.executor import plot_umap
+        from src.domain.plotting.executor import plot_umap
         result = plot_umap(adata, color=profile.sample_genes[0])
         assert valid_png(result.image)
         if _SAVE_PLOTS:
@@ -510,7 +510,7 @@ class TestPlotting:
             pytest.skip("Dataset has no X_umap embedding")
         if not profile.condition_column:
             pytest.skip("Dataset has no condition column")
-        from src.plotting.executor import plot_umap
+        from src.domain.plotting.executor import plot_umap
         result = plot_umap(adata, color=profile.primary_groupby, split_by=profile.condition_column)
         assert valid_png(result.image)
         if _SAVE_PLOTS:
@@ -520,7 +520,7 @@ class TestPlotting:
         """plot_umap with non-existent color key raises ValueError."""
         if not profile.has_umap:
             pytest.skip("Dataset has no X_umap embedding")
-        from src.plotting.executor import plot_umap
+        from src.domain.plotting.executor import plot_umap
         with pytest.raises(ValueError):
             plot_umap(adata, color="nonexistent_col_xyz_abc")
 
@@ -528,7 +528,7 @@ class TestPlotting:
         """plot_violin for a sample gene returns valid PNG."""
         if not profile.sample_genes:
             pytest.skip("No sample genes available")
-        from src.plotting.executor import plot_violin
+        from src.domain.plotting.executor import plot_violin
         result = plot_violin(adata, genes=[profile.sample_genes[0]], groupby=profile.primary_groupby)
         assert valid_png(result.image)
         if _SAVE_PLOTS:
@@ -536,7 +536,7 @@ class TestPlotting:
 
     def test_plot_violin_invalid_gene_raises(self, adata, profile):
         """plot_violin with non-existent gene raises ValueError."""
-        from src.plotting.executor import plot_violin
+        from src.domain.plotting.executor import plot_violin
         with pytest.raises(ValueError):
             plot_violin(adata, genes=["FAKEGENE_XYZ_999"], groupby=profile.primary_groupby)
 
@@ -546,7 +546,7 @@ class TestPlotting:
             pytest.skip("Dataset has no X_umap embedding")
         if not profile.sample_genes:
             pytest.skip("No sample genes available")
-        from src.plotting.executor import plot_feature
+        from src.domain.plotting.executor import plot_feature
         result = plot_feature(adata, gene=profile.sample_genes[0])
         assert valid_png(result.image)
         if _SAVE_PLOTS:
@@ -556,7 +556,7 @@ class TestPlotting:
         """plot_feature with non-existent gene raises ValueError."""
         if not profile.has_umap:
             pytest.skip("Dataset has no X_umap embedding")
-        from src.plotting.executor import plot_feature
+        from src.domain.plotting.executor import plot_feature
         with pytest.raises(ValueError):
             plot_feature(adata, gene="FAKEGENE_XYZ_999")
 
@@ -568,7 +568,7 @@ class TestPlotting:
             pytest.skip("Dataset has no condition column")
         if not profile.sample_genes:
             pytest.skip("No sample genes available")
-        from src.plotting.executor import plot_feature
+        from src.domain.plotting.executor import plot_feature
         result = plot_feature(adata, gene=profile.sample_genes[0], split_by=profile.condition_column)
         assert valid_png(result.image)
         assert "split" in result.message.lower()
@@ -579,7 +579,7 @@ class TestPlotting:
         """plot_dotplot for sample genes returns valid PNG."""
         if len(profile.sample_genes) < 2:
             pytest.skip("Need at least 2 sample genes")
-        from src.plotting.comparison import plot_dotplot
+        from src.domain.plotting.comparison import plot_dotplot
         result = plot_dotplot(adata, genes=profile.sample_genes[:2], groupby=profile.primary_groupby)
         assert valid_png(result.image)
         if _SAVE_PLOTS:
@@ -592,7 +592,7 @@ class TestPlotting:
         """
         if not profile.has_umap:
             pytest.skip("Dataset has no X_umap embedding")
-        from src.plotting.executor import plot_umap
+        from src.domain.plotting.executor import plot_umap
         with_legend = plot_umap(adata, color=profile.primary_groupby, show_legend=True)
         without_legend = plot_umap(adata, color=profile.primary_groupby, show_legend=False)
         assert valid_png(with_legend.image)
@@ -604,8 +604,8 @@ class TestPlotting:
 
     def test_plot_volcano_returns_valid_png(self, adata_with_de, profile, plot_dir):
         """plot_volcano from DE results returns valid PNG."""
-        from src.analysis.differential import get_de_dataframe
-        from src.plotting.volcano import plot_volcano
+        from src.domain.analysis.differential import get_de_dataframe
+        from src.domain.plotting.volcano import plot_volcano
         groups = adata_with_de.obs[profile.primary_groupby].unique()
         group = str(groups[0])
         de_df = get_de_dataframe(adata_with_de, group=group)
@@ -631,7 +631,7 @@ class TestPairwiseVolcanoIntegration:
 
     def test_pairwise_de_preserves_rank_genes_groups(self, adata, profile):
         """Pairwise DE does not overwrite prior all-vs-rest DE results."""
-        from src.analysis.differential import run_differential_expression, run_pairwise_de
+        from src.domain.analysis.differential import run_differential_expression, run_pairwise_de
 
         groups = adata.obs[profile.primary_groupby].unique()
         if len(groups) < 2:
@@ -663,8 +663,8 @@ class TestPairwiseVolcanoIntegration:
 
     def test_volcano_works_for_regular_de_group(self, adata, profile):
         """Volcano plot works for regular DE group after all-vs-rest."""
-        from src.analysis.differential import get_de_dataframe, run_differential_expression
-        from src.plotting.volcano import plot_volcano
+        from src.domain.analysis.differential import get_de_dataframe, run_differential_expression
+        from src.domain.plotting.volcano import plot_volcano
 
         groups = adata.obs[profile.primary_groupby].unique()
         if len(groups) < 1:
@@ -682,7 +682,7 @@ class TestPairwiseVolcanoIntegration:
 
     def test_volcano_works_for_pairwise_key(self, adata, profile):
         """Volcano plot works for pairwise 'X vs Y' key after compare_groups_de."""
-        from src.analysis.differential import get_de_dataframe, run_pairwise_de
+        from src.domain.analysis.differential import get_de_dataframe, run_pairwise_de
 
         groups = adata.obs[profile.primary_groupby].unique()
         if len(groups) < 2:
@@ -711,7 +711,7 @@ class TestPairwiseVolcanoIntegration:
 
     def test_invalid_volcano_group_raises_valueerror(self, adata, profile):
         """Invalid volcano group raises ValueError (not returns error string)."""
-        from src.analysis.differential import get_de_dataframe, run_differential_expression
+        from src.domain.analysis.differential import get_de_dataframe, run_differential_expression
 
         adata_copy = adata.copy()
         run_differential_expression(
