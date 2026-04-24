@@ -1,7 +1,7 @@
 """Admin monitoring dashboard — powered by RDS PostgreSQL.
 
 Tabs: Overview · Users · Tools · Sessions
-Run via docker-compose (port 8502) or: uv run streamlit run src/monitoring/dashboard.py
+Run via docker-compose (port 8502) or: uv run streamlit run src/platform/observability/dashboard.py
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-_PROJECT_ROOT = str(Path(__file__).resolve().parent.parent.parent)
+_PROJECT_ROOT = str(Path(__file__).resolve().parent.parent.parent.parent)
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
