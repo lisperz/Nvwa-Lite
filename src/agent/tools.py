@@ -17,7 +17,7 @@ from src.agent import analysis_tools
 from src.agent import subset_tools
 from src.agent.viz_state import update_viz_state
 from src.domain.analysis.calculations import calculate_mito_percentage, get_metadata_summary
-from src.domain.analysis.gene_lookup import lookup_gene_name
+from src.domain.resolver.gene_lookup import lookup_gene_name
 from src.domain.analysis.composition import cross_tabulate_metadata
 from src.domain.analysis.differential import get_de_dataframe, run_differential_expression, run_pairwise_de, get_all_de_results
 from src.domain.analysis.marker_genes import get_top_marker_genes_per_cluster

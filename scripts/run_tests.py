@@ -135,9 +135,20 @@ def _valid_table(t: Any) -> bool:
 # ── Dataset loader ─────────────────────────────────────────────────────────────
 
 def load_adata(dataset_path: Path) -> Any:
-    """Load and return an AnnData, suppressing legacy format warnings."""
+    """Load AnnData and run upload-time annotations (mirrors ui/app.py:load_dataset).
+
+    Running `detect_species` + `classify_columns` here is what populates
+    `adata.uns["nvwa_meta"]`; without it, spec-pipeline tools like
+    `dataset_overview` see an empty meta and return only the bare header line.
+    """
     from src.domain.analysis.h5ad_loader import load_h5ad
-    return load_h5ad(dataset_path)
+    from src.domain.resolver.column_classifier import classify as classify_columns
+    from src.domain.resolver.species_detector import detect_species
+
+    adata = load_h5ad(dataset_path)
+    detect_species(adata)
+    classify_columns(adata)
+    return adata
 
 
 # ── Single-test runner ─────────────────────────────────────────────────────────

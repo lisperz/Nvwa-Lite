@@ -21,6 +21,8 @@ import streamlit as st
 
 from src.agent.core import create_agent
 from src.domain.analysis.h5ad_loader import load_h5ad
+from src.domain.resolver.column_classifier import classify as classify_columns
+from src.domain.resolver.species_detector import detect_species
 from src.agent.tools import clear_plot_results, clear_table_results, get_plot_results, get_table_results, set_adata_replaced_callback, set_plot_generated_callback
 from src.agent.viz_state import VisualizationState, get_viz_state
 from src.platform.infra.auth import AuthService
@@ -250,9 +252,15 @@ else:
 
 @st.cache_resource
 def load_dataset(path: str) -> object:
-    """Load and cache an .h5ad file from any local path."""
+    """Load, classify, and cache an .h5ad file from any local path.
+
+    Runs upload-time heuristics (species detection + column-role classification)
+    so downstream tools can read adata.uns["nvwa_meta"] without re-classifying.
+    """
     logger.info("Loading dataset: %s", path)
     adata = load_h5ad(path)
+    detect_species(adata)
+    classify_columns(adata)
     logger.info("Dataset loaded: %d cells, %d genes", adata.n_obs, adata.n_vars)
     return adata
 

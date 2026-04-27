@@ -52,6 +52,7 @@ description: "Regression tests for nvwa-mvp scRNA visualization MVP"
 #   zhang    : customer prompts (Zhang / cardiac); tracks known-failing bugs.
 # Cases omit `source:` to default to internal. Paths resolved relative to repo root.
 source_defaults:
+  internal: local/data/pbmc_test.h5ad
   dai: local/data/lung_combined_slim_v3.h5ad
   zhang: local/data/GSE223414_slim.h5ad
 
@@ -176,11 +177,12 @@ tests:
     prompt: "Show a violin plot for FAKEGENE999."
     expected_status: FAIL
     must_contain:
-      - "not present"
+      - "not found"
     notes: >
       Gene validation: FAKEGENE999 does not exist. Agent must report the gene
-      is missing (and ideally suggest alternatives). Agent uses "not present"
-      not "not found".
+      is missing (and ideally suggest alternatives). Updated 2026-04-24: agent
+      consistently says "not found" (matches gene_lookup wording); previous
+      "not present" assertion was a stale artifact of an earlier prompt rev.
 
   - case_id: DA-10
     category: data_analysis
@@ -227,6 +229,13 @@ tests:
       Color-key validation on scatter plot. Previous runs showed agent silently
       substituting louvain for the bad key. "Do not fall back" + must_not_contain
       together catch silent substitution.
+      KNOWN FAIL (2026-04-24) — deferred pending prompt cleanup. Rule 6
+      (OUT-OF-SCOPE DECLINE) over-triggers because the prompt's "imaginary"
+      lexical cue + "do not fall back" directive align with the OOS attractor
+      more strongly than PROBE-FIRST (Rule 2). Structural fix requires either
+      eliminating Rule 6's verbatim reply template (collapses attractor) or
+      moving PROBE-FIRST validation into code so it runs deterministically
+      before the LLM ever sees the prompt. Tracked separately from T-038.
 
   - case_id: DA-13
     category: data_analysis
@@ -370,14 +379,16 @@ tests:
       perform batch correction using Harmony.
     expected_status: FAIL
     must_contain:
-      - "don't"
+      - "not supported in this version"
     must_not_contain:
       - "integration complete"
       - "harmony applied"
       - "batch correction done"
     notes: >
-      Dataset integration / batch correction is out of scope. Agent should
-      politely decline and redirect to supported analyses.
+      Dataset integration / batch correction is out of scope. Agent declines
+      via Rule 6 (OUT-OF-SCOPE DECLINE PROTOCOL) with the standard wording
+      "not supported in this version". must_not_contain still guards against
+      fake-success substitution.
 
   - case_id: OOS-02
     category: out_of_scope
@@ -449,6 +460,54 @@ tests:
       Tests the heatmap tool, which has no other coverage in the suite.
       If rank_genes_groups is pre-computed the agent plots directly; otherwise
       it runs DE first then heatmap. WARN because dataset-dependent.
+
+  # ── spec_pipeline end-to-end — new 2a/2b paths (T-038) ──────────────────────
+  # Validates the post-step-10 core.py fork. Runs against the default internal
+  # dataset (pbmc_test.h5ad); also run against the dai + zhang datasets via
+  # --dataset override for multi-dataset coverage.
+
+  - case_id: SP-01
+    category: data_analysis
+    prompt: "Give me a data overview."
+    expected_status: PASS
+    must_contain:
+      - "cells"
+      - "genes"
+    must_not_contain:
+      - "Error"
+      - "couldn't"
+    expected_artifact_count: 0
+    notes: >
+      Spec-pipeline happy path. Router matches "data overview" → layer=2a,
+      task_type=dataset_info. Extractor then picks dataset_overview from
+      REGISTRY (only @register tool today; dataset_info is legacy and not
+      in REGISTRY), resolver pass-through, validator ok, dispatch reads
+      adata.uns["nvwa_meta"] populated by detect_species + classify_columns
+      in scripts/run_tests.py:load_adata, responder narrates, gatekeeper
+      passes. End-to-end new-path validation. Assertions are dataset-agnostic
+      since content varies across the three target datasets. Prompt chosen
+      to differ from DA-01 so router matches a different keyword and this
+      case is independent.
+
+  - case_id: SP-02
+    category: interpretation
+    prompt: "Explain why similar cells tend to form tight clusters in scRNA-seq data."
+    expected_status: PASS
+    expected_artifact_count: 0
+    must_not_contain:
+      - "has been generated"
+      - "has been plotted"
+      - "i've generated"
+      - "i have generated"
+    notes: >
+      2b plain-LLM path. Router matches "explain" (Tier-1 2b pattern) and
+      returns layer=2b before Tier-2 keyword scan runs. Core.py routes to
+      _run_plain_llm → ChatOpenAI.invoke without bind_tools → text response,
+      no tool call. output_guard remains as a safety net for fabricated
+      artifact claims (checked via must_not_contain phrases). Prompt
+      intentionally distinct from INT-01/02 so SP-02 behavior doesn't couple
+      to future INT prompt tuning. Avoid the word "embedding" here — it
+      matches the umap_plot keyword set and would flip router to 2a.
 
   # ── customer: dai (mouse lung — Fabp4/Fabp5, WT/CKO/TKO, EC) ────────────────
   # Prompts captured verbatim from Dai's 2026-04-20 session.

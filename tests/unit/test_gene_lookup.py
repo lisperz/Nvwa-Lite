@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from src.domain.analysis.gene_lookup import (
+from src.domain.resolver.gene_lookup import (
     GeneLookupResult,
     lookup_gene_name,
     _try_case_insensitive,
