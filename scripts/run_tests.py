@@ -26,6 +26,7 @@ Environment
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import sys
@@ -398,6 +399,7 @@ def write_report(
             f"- **Actual status:** {r.status.upper()}",
             f"- **Duration:** {r.duration_s:.2f}s",
             f"- **Artifacts:** {_artifact_label(r)}",
+            f"- **Tool called:** {r.tool_called}",
         ]
         if r.notes:
             lines.append(f"- **Notes:** {r.notes}")
@@ -483,6 +485,15 @@ def main() -> int:
             "prompt so OpenAI prompt-prefix caching does not contaminate "
             "replicated runs of the same test. Rows in the combined report "
             "are suffixed with #1..#N. Default: 1."
+        ),
+    )
+    parser.add_argument(
+        "--save-responses-json", default=None,
+        help=(
+            "If set, write per-case full responses (prompt, status, final_text, "
+            "duration, failures) to this JSON path alongside the markdown report. "
+            "Off by default; used by the weekly routine to assemble eyeball-ready "
+            "response docs from flaky cases."
         ),
     )
     args = parser.parse_args()
@@ -677,6 +688,35 @@ def main() -> int:
 
     write_report(results, report_path, dataset_path, args.model, elapsed)
     print(f"Report → {report_path}")
+
+    if args.save_responses_json:
+        json_path = Path(args.save_responses_json)
+        json_path.parent.mkdir(parents=True, exist_ok=True)
+        json_path.write_text(
+            json.dumps(
+                [
+                    {
+                        "case_id": r.case_id,
+                        "category": r.category,
+                        "prompt": r.prompt,
+                        "expected_status": r.expected_status,
+                        "status": r.status,
+                        "duration_s": r.duration_s,
+                        "tool_called": r.tool_called,
+                        "plot_count": r.plot_count,
+                        "table_count": r.table_count,
+                        "notes": r.notes,
+                        "failures": r.failures,
+                        "failure_category": r.failure_category,
+                        "final_text": r.final_text,
+                    }
+                    for r in results
+                ],
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        print(f"Responses JSON → {json_path}")
 
     return 0 if (n_fail == 0 and n_error == 0) else 1
 
