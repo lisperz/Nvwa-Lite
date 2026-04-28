@@ -171,6 +171,7 @@ def run_one(
     prepended to the agent's system prompt so OpenAI prompt-prefix caching
     does not contaminate replicated runs of the same test.
     """
+    from src.agent import artifacts
     from src.agent.core import create_agent
     from src.agent.tools import clear_plot_results, clear_table_results, get_plot_results, get_table_results
     from src.core.types import detect_dataset_state
@@ -183,6 +184,7 @@ def run_one(
     # Clear artifact buffers from any previous test before loading the agent.
     clear_plot_results()
     clear_table_results()
+    artifacts.clear()
 
     adata = load_adata(dataset_path)
     state = detect_dataset_state(
@@ -216,12 +218,13 @@ def run_one(
             time.sleep(wait)
             clear_plot_results()
             clear_table_results()
+            artifacts.clear()
 
-    # Collect artifacts from the module-level buffers in tools.py.
-    # get_plot_results() / get_table_results() clear the buffer after reading,
-    # so each test starts with a clean slate.
-    plot_results = get_plot_results()
-    table_results = get_table_results()
+    # Collect artifacts from both the legacy tools.py singletons and the new
+    # spec-pipeline artifacts.py singleton (mirrors the UI adapter at
+    # src/ui/app.py:477-478). Aggregate across both during the L1→L4 migration.
+    plot_results = get_plot_results() + artifacts.get_plot_results()
+    table_results = get_table_results() + artifacts.get_table_results()
 
     return resp.text, resp.tool_called, plot_results, table_results
 
