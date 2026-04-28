@@ -27,11 +27,11 @@ from typing import Any, Optional
 
 import pytest
 
-import src.tools.registry as reg_module
+import src.core.registry as reg_module
 from src.core.spec import Spec, Canonicalization
 from src.spec_validation.result import Issue, ValidationResult
 from src.spec_validation.validator import validate
-from src.tools.registry import REGISTRY, get_tool_names, register
+from src.core.registry import REGISTRY, get_tool_names, register
 
 
 # ---------------------------------------------------------------------------
@@ -523,8 +523,8 @@ class TestUnknownCustomTypeTag:
 
     def test_unknown_string_tag_does_not_produce_wrong_type(self):
         """If someone injects a weird type tag string, validator must still pass."""
-        from src.tools.registry import ParamSpec, ToolEntry
-        import src.tools.registry as reg_module
+        from src.core.registry import ParamSpec, ToolEntry
+        import src.core.registry as reg_module
 
         def stub_fn() -> None:
             pass

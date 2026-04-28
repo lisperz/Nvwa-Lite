@@ -22,7 +22,7 @@ from typing import Any
 
 from src.core.spec import Spec
 from src.spec_validation.result import Issue, ValidationResult
-from src.tools.registry import get_tool, get_tool_names
+from src.core.registry import get_tool, get_tool_names
 
 
 def validate(spec: Spec) -> tuple[Spec, ValidationResult]:

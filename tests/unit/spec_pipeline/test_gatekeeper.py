@@ -23,7 +23,7 @@ from typing import Any, Optional
 
 import pytest
 
-import src.tools.registry as reg_module
+import src.core.registry as reg_module
 from src.agent.gatekeeper import (
     GatekeeperResult,
     _ARTIFACT_CLAIM_PHRASES,
@@ -31,7 +31,7 @@ from src.agent.gatekeeper import (
     check,
 )
 from src.core.spec import Spec
-from src.tools.registry import register
+from src.core.registry import register
 
 
 # ---------------------------------------------------------------------------

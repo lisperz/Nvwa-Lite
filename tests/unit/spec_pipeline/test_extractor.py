@@ -20,13 +20,13 @@ from unittest.mock import MagicMock
 import pytest
 
 import src.agent.extractor as extractor_module
-import src.tools.registry as reg_module
+import src.core.registry as reg_module
 from src.agent.extractor import (
     _format_tool_catalog,
     extract,
 )
 from src.core.spec import Spec
-from src.tools.registry import register
+from src.core.registry import register
 
 
 # ---------------------------------------------------------------------------

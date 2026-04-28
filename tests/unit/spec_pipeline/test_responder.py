@@ -23,7 +23,7 @@ from unittest.mock import MagicMock
 import pytest
 
 import src.agent.responder as responder_module
-import src.tools.registry as reg_module
+import src.core.registry as reg_module
 from src.agent.responder import (
     ResponderResult,
     _compute_defaults_applied,
@@ -32,7 +32,7 @@ from src.agent.responder import (
     draft_response,
 )
 from src.core.spec import Canonicalization, Spec
-from src.tools.registry import ParamSpec, ToolEntry, register
+from src.core.registry import ParamSpec, ToolEntry, register
 
 
 # ---------------------------------------------------------------------------

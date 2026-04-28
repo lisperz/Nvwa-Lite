@@ -1,4 +1,4 @@
-"""Exhaustive-branch unit tests for src/tools/registry.py.
+"""Exhaustive-branch unit tests for src/core/registry.py.
 
 Covers every public function and every documented behavioral branch of the
 internal _build_param_specs / _type_tag helpers, exercised only through the
@@ -16,8 +16,8 @@ from typing import List, Optional
 
 import pytest
 
-import src.tools.registry as reg_module
-from src.tools.registry import (
+import src.core.registry as reg_module
+from src.core.registry import (
     REGISTRY,
     ParamSpec,
     ToolEntry,

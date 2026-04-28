@@ -29,11 +29,11 @@ import numpy as np
 import pandas as pd
 import pytest
 
-import src.tools.registry as reg_module
+import src.core.registry as reg_module
 from src.core.spec import Spec
 from src.domain.resolver.resolver import resolve
 from src.spec_validation.result import Issue
-from src.tools.registry import REGISTRY, register
+from src.core.registry import REGISTRY, register
 
 
 # ---------------------------------------------------------------------------

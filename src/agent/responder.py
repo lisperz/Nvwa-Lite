@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING
 from openai import OpenAI
 
 from src.core.spec import Spec
-from src.tools.registry import get_tool
+from src.core.registry import get_tool
 
 if TYPE_CHECKING:
     pass

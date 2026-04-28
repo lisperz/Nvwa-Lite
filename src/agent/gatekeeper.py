@@ -26,7 +26,7 @@ from dataclasses import dataclass
 from typing import Any, Literal, Optional
 
 from src.core.spec import Spec
-from src.tools.registry import get_tool, get_tool_names
+from src.core.registry import get_tool, get_tool_names
 
 
 # Artifact-claim phrases (ported from src/agent/output_guard.py)

@@ -9,7 +9,7 @@ from src.domain.resolver.cell_type_lookup import lookup_cell_type_name
 from src.domain.resolver.condition_lookup import lookup_condition_name
 from src.domain.resolver.gene_lookup import lookup_gene_name
 from src.spec_validation.result import Issue
-from src.tools.registry import get_tool
+from src.core.registry import get_tool
 
 if TYPE_CHECKING:
     from anndata import AnnData

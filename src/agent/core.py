@@ -23,7 +23,8 @@ from typing import TYPE_CHECKING
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_openai import ChatOpenAI
 
-import src.tools  # noqa: F401 — import triggers @register side-effects so REGISTRY is populated
+import src.domain  # noqa: F401 — import triggers @register side-effects so REGISTRY is populated
+from src.agent import artifacts
 from src.agent.extractor import extract
 from src.agent.gatekeeper import check as gatekeeper_check
 from src.agent.output_guard import (
@@ -43,12 +44,13 @@ from src.agent.tools import (
     get_table_results,
 )
 from src.agent.viz_state import VisualizationState, bind_viz_state
+from src.core.registry import REGISTRY, get_tool
+from src.core.results import ArtifactResult, TextResult, ToolExecutionError
 from src.domain.resolver.resolver import resolve
 from src.platform.infra.db.logger import DatabaseLogger
 from src.platform.observability.events import EventLogger
 from src.spec_validation.result import Issue
 from src.spec_validation.validator import validate
-from src.tools.registry import REGISTRY, get_tool
 
 if TYPE_CHECKING:
     from anndata import AnnData
@@ -353,8 +355,8 @@ class AgentRunner:
             "retry": False,
         })
 
-        plots = get_plot_results()
-        tables = get_table_results()
+        plots = get_plot_results() + artifacts.get_plot_results()
+        tables = get_table_results() + artifacts.get_table_results()
         g = gatekeeper_check(spec, tool_output, rr.text, plots, tables)
 
         final_text = rr.text
@@ -396,17 +398,35 @@ class AgentRunner:
         )
 
     def _dispatch_registered(self, spec, turn_id: str) -> str:
-        """Dispatch a @register tool with adata injected positionally. Log execution."""
+        """Dispatch a @register tool with adata injected positionally. Log execution.
+
+        Contract (L1): @register tools return ToolResult (TextResult | ArtifactResult).
+        ArtifactResult bytes are bridged into the legacy artifact channel via
+        artifacts.consume_artifact_result so UI consumption stays unchanged during
+        migration. _classify_tool_status is NOT called here — it's the legacy
+        LangChain-loop convention; the new path uses raw.status directly.
+        """
         entry = get_tool(spec.tool_name)
         assert entry is not None  # validator guarantees it's in REGISTRY
 
         tool_start = time.time()
+        error_stacktrace = None
         try:
             raw = entry.callable(self._adata, **spec.params)
-            tool_output = str(raw)
+            assert isinstance(raw, (TextResult, ArtifactResult)), (
+                f"Tool {spec.tool_name!r} returned {type(raw).__name__}, expected ToolResult"
+            )
+            if isinstance(raw, ArtifactResult):
+                artifacts.consume_artifact_result(raw)
+            tool_output = raw.text
+            status = raw.status
+            error_msg = raw.error_message
             tool_duration = time.time() - tool_start
-            status, error_msg = _classify_tool_status(tool_output)
-            error_stacktrace = None
+        except ToolExecutionError as e:
+            tool_duration = time.time() - tool_start
+            tool_output = f"Error: {e}"
+            status = "error"
+            error_msg = str(e)[:200]
         except Exception as e:
             logger.exception("Registered-tool dispatch failed: %s", spec.tool_name)
             tool_duration = time.time() - tool_start
@@ -770,8 +790,8 @@ class AgentRunner:
                 turn_id=turn_id,
             )
             if msg_id is not None:
-                plots = get_plot_results()
-                tables = get_table_results()
+                plots = get_plot_results() + artifacts.get_plot_results()
+                tables = get_table_results() + artifacts.get_table_results()
                 logger.info(
                     "Artifact logging: msg_id=%s plots=%d tables=%d",
                     msg_id, len(plots), len(tables),

@@ -1,10 +1,12 @@
-"""Exhaustive-branch unit tests for dataset_overview(adata).
+"""Exhaustive-branch unit tests for dataset_overview.
 
-Tests every branch documented in src/tools/inspection.py and in the
+Tests every branch documented in src/domain/inspection.py and in the
 'tools/inspection.py + registry amendment contract (locked)' section of
 local/product/prompt_flow_mvp_2026-04-22.md.
 
-All branches exercised via the public dataset_overview() return string.
+All branches exercised via the .text str of the TextResult that
+dataset_overview() returns (the L1 substrate migration wraps the legacy
+str return in a typed TextResult; .text is the same string content).
 Private helpers (_get_meta, _species_line, etc.) are NOT imported directly.
 
 Assertions use substring matching so future wording tweaks don't break tests.
@@ -15,7 +17,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.tools.inspection import dataset_overview
+from src.domain.inspection import dataset_overview
 
 
 # ---------------------------------------------------------------------------
@@ -41,39 +43,39 @@ class TestMetaAbsence:
 
     def test_no_nvwa_meta_key_returns_header(self, adata):
         _clear_meta(adata)
-        result = dataset_overview(adata)
+        result = dataset_overview(adata).text
         assert "cells" in result
         assert "genes" in result
 
     def test_no_nvwa_meta_key_no_species_line(self, adata):
         _clear_meta(adata)
-        result = dataset_overview(adata)
+        result = dataset_overview(adata).text
         assert "Species:" not in result
 
     def test_no_nvwa_meta_key_no_conditions_line(self, adata):
         _clear_meta(adata)
-        result = dataset_overview(adata)
+        result = dataset_overview(adata).text
         assert "Conditions detected:" not in result
 
     def test_no_nvwa_meta_key_no_cell_types_line(self, adata):
         _clear_meta(adata)
-        result = dataset_overview(adata)
+        result = dataset_overview(adata).text
         assert "Cell types annotated:" not in result
 
     def test_no_nvwa_meta_key_no_ambiguity_questions(self, adata):
         _clear_meta(adata)
-        result = dataset_overview(adata)
+        result = dataset_overview(adata).text
         assert "I need your help" not in result
 
     def test_no_nvwa_meta_key_header_contains_cell_count(self, adata):
         _clear_meta(adata)
-        result = dataset_overview(adata)
+        result = dataset_overview(adata).text
         # n_obs formatted as "{n_obs:,}" — for small subsets like 200 no comma is added
         assert f"{adata.n_obs:,}" in result
 
     def test_no_nvwa_meta_key_header_contains_gene_count(self, adata):
         _clear_meta(adata)
-        result = dataset_overview(adata)
+        result = dataset_overview(adata).text
         assert f"{adata.n_vars:,}" in result
 
 
@@ -82,27 +84,27 @@ class TestMetaEmpty:
 
     def test_empty_meta_returns_header(self, adata):
         _set_meta(adata, {})
-        result = dataset_overview(adata)
+        result = dataset_overview(adata).text
         assert "cells" in result and "genes" in result
 
     def test_empty_meta_no_species(self, adata):
         _set_meta(adata, {})
-        result = dataset_overview(adata)
+        result = dataset_overview(adata).text
         assert "Species:" not in result
 
     def test_empty_meta_no_conditions(self, adata):
         _set_meta(adata, {})
-        result = dataset_overview(adata)
+        result = dataset_overview(adata).text
         assert "Conditions detected:" not in result
 
     def test_empty_meta_no_cell_types(self, adata):
         _set_meta(adata, {})
-        result = dataset_overview(adata)
+        result = dataset_overview(adata).text
         assert "Cell types annotated:" not in result
 
     def test_empty_meta_no_ambiguity(self, adata):
         _set_meta(adata, {})
-        result = dataset_overview(adata)
+        result = dataset_overview(adata).text
         assert "I need your help" not in result
 
 
@@ -111,17 +113,17 @@ class TestMetaNonDictValue:
 
     def test_none_meta_no_crash(self, adata):
         adata.uns["nvwa_meta"] = None
-        result = dataset_overview(adata)
+        result = dataset_overview(adata).text
         assert "cells" in result
 
     def test_string_meta_no_crash(self, adata):
         adata.uns["nvwa_meta"] = "invalid"
-        result = dataset_overview(adata)
+        result = dataset_overview(adata).text
         assert "cells" in result
 
     def test_non_dict_meta_no_species(self, adata):
         adata.uns["nvwa_meta"] = 42
-        result = dataset_overview(adata)
+        result = dataset_overview(adata).text
         assert "Species:" not in result
 
 
@@ -137,38 +139,38 @@ class TestSpeciesHighConfidence:
 
     def test_declared_source_shows_declared_note(self, adata):
         _set_meta(adata, {"species": self._make_species("human", "declared")})
-        result = dataset_overview(adata)
+        result = dataset_overview(adata).text
         assert "Species: human" in result
         assert "declared in dataset metadata" in result
 
     def test_ensembl_prefix_source_shows_ensembl_note(self, adata):
         _set_meta(adata, {"species": self._make_species("mouse", "ensembl_prefix")})
-        result = dataset_overview(adata)
+        result = dataset_overview(adata).text
         assert "Species: mouse" in result
         assert "detected from Ensembl prefixes" in result
 
     def test_gene_case_source_shows_gene_case_note(self, adata):
         _set_meta(adata, {"species": self._make_species("rat", "gene_case")})
-        result = dataset_overview(adata)
+        result = dataset_overview(adata).text
         assert "Species: rat" in result
         assert "detected from gene-symbol case" in result
 
     def test_unknown_source_falls_through_to_detected(self, adata):
         """Catch-all: unrecognized source maps to 'detected'."""
         _set_meta(adata, {"species": self._make_species("human", "some_future_source")})
-        result = dataset_overview(adata)
+        result = dataset_overview(adata).text
         assert "Species: human" in result
         assert "detected" in result
 
     def test_empty_string_source_falls_through_to_detected(self, adata):
         _set_meta(adata, {"species": self._make_species("mouse", "")})
-        result = dataset_overview(adata)
+        result = dataset_overview(adata).text
         assert "Species: mouse" in result
         assert "detected" in result
 
     def test_species_line_ends_with_period(self, adata):
         _set_meta(adata, {"species": self._make_species("human", "declared")})
-        result = dataset_overview(adata)
+        result = dataset_overview(adata).text
         # The species line ends with a period
         for line in result.split("\n"):
             if "Species:" in line:
@@ -188,7 +190,7 @@ class TestSpeciesLowConfidence:
             "species": {"value": None, "confidence": "low", "source": "gene_case",
                         "candidates": ["mouse", "rat"]},
         })
-        result = dataset_overview(adata)
+        result = dataset_overview(adata).text
         # Summary line "Species: <value> (<source>)." must not appear; the ambiguity
         # question section may still contain the substring "Species:" as its prefix.
         first_line = result.split("\n", 1)[0]
@@ -203,7 +205,7 @@ class TestSpeciesLowConfidence:
             "species": {"value": None, "confidence": "low", "source": "gene_case",
                         "candidates": ["mouse", "rat"]},
         })
-        result = dataset_overview(adata)
+        result = dataset_overview(adata).text
         assert "Title-case" in result
         assert "mouse" in result
         assert "rat" in result
@@ -214,7 +216,7 @@ class TestSpeciesLowConfidence:
             "species": {"value": None, "confidence": "low", "source": "ensembl_prefix",
                         "candidates": ["human", "mouse"]},
         })
-        result = dataset_overview(adata)
+        result = dataset_overview(adata).text
         assert "couldn't detect" in result
         assert "human" in result
         assert "mouse" in result
@@ -225,7 +227,7 @@ class TestSpeciesLowConfidence:
             "species": {"value": None, "confidence": "low", "source": "declared",
                         "candidates": ["human"]},
         })
-        result = dataset_overview(adata)
+        result = dataset_overview(adata).text
         assert "couldn't detect" in result
 
     def test_low_conf_triggers_ambiguity_section_header(self, adata):
@@ -233,19 +235,19 @@ class TestSpeciesLowConfidence:
             "species": {"value": None, "confidence": "low", "source": "gene_case",
                         "candidates": ["mouse", "rat"]},
         })
-        result = dataset_overview(adata)
+        result = dataset_overview(adata).text
         assert "I need your help" in result
 
     def test_missing_species_key_no_species_line(self, adata):
         """No 'species' key at all → no species line, no ambiguity question."""
         _set_meta(adata, {"schema": {}})
-        result = dataset_overview(adata)
+        result = dataset_overview(adata).text
         assert "Species:" not in result
 
     def test_species_non_dict_no_species_line(self, adata):
         """species value is not a dict → silently skipped."""
         _set_meta(adata, {"species": "human"})
-        result = dataset_overview(adata)
+        result = dataset_overview(adata).text
         assert "Species:" not in result
 
     def test_species_no_value_high_conf_no_line(self, adata):
@@ -253,7 +255,7 @@ class TestSpeciesLowConfidence:
         _set_meta(adata, {
             "species": {"value": None, "confidence": "high", "source": "declared", "candidates": []},
         })
-        result = dataset_overview(adata)
+        result = dataset_overview(adata).text
         assert "Species:" not in result
 
     def test_species_empty_value_high_conf_no_line(self, adata):
@@ -261,7 +263,7 @@ class TestSpeciesLowConfidence:
         _set_meta(adata, {
             "species": {"value": "", "confidence": "high", "source": "declared", "candidates": []},
         })
-        result = dataset_overview(adata)
+        result = dataset_overview(adata).text
         assert "Species:" not in result
 
 
@@ -274,12 +276,12 @@ class TestConditionsLine:
 
     def test_no_condition_cols_key_no_conditions_line(self, adata):
         _set_meta(adata, {"schema": {}})
-        result = dataset_overview(adata)
+        result = dataset_overview(adata).text
         assert "Conditions detected:" not in result
 
     def test_empty_condition_cols_no_conditions_line(self, adata):
         _set_meta(adata, {"condition_cols": [], "schema": {}})
-        result = dataset_overview(adata)
+        result = dataset_overview(adata).text
         assert "Conditions detected:" not in result
 
     def test_condition_col_with_values(self, adata):
@@ -289,7 +291,7 @@ class TestConditionsLine:
                 "treatment": {"role": "condition", "values": ["ctrl", "drug"], "n_unique": 2},
             },
         })
-        result = dataset_overview(adata)
+        result = dataset_overview(adata).text
         assert "Conditions detected:" in result
         assert "treatment" in result
         assert "ctrl" in result
@@ -302,7 +304,7 @@ class TestConditionsLine:
                 "batch": {"role": "condition", "n_unique": 5},
             },
         })
-        result = dataset_overview(adata)
+        result = dataset_overview(adata).text
         assert "Conditions detected:" in result
         assert "batch" in result
         assert "5" in result
@@ -313,7 +315,7 @@ class TestConditionsLine:
             "condition_cols": ["group"],
             "schema": {"group": {}},
         })
-        result = dataset_overview(adata)
+        result = dataset_overview(adata).text
         assert "Conditions detected:" in result
         assert "?" in result
 
@@ -325,7 +327,7 @@ class TestConditionsLine:
                 "timepoint": {"values": ["d0", "d7"], "n_unique": 2},
             },
         })
-        result = dataset_overview(adata)
+        result = dataset_overview(adata).text
         assert "treatment" in result
         assert "timepoint" in result
 
@@ -335,14 +337,14 @@ class TestConditionsLine:
             "condition_cols": ["mystery_col"],
             "schema": {},
         })
-        result = dataset_overview(adata)
+        result = dataset_overview(adata).text
         assert "mystery_col" in result
         assert "?" in result
 
     def test_condition_cols_not_a_list_no_conditions_line(self, adata):
         """condition_cols set to non-list → no conditions line (type guard)."""
         _set_meta(adata, {"condition_cols": "treatment", "schema": {}})
-        result = dataset_overview(adata)
+        result = dataset_overview(adata).text
         assert "Conditions detected:" not in result
 
 
@@ -355,7 +357,7 @@ class TestCellTypesLine:
 
     def test_no_cell_type_col_no_cell_types_line(self, adata):
         _set_meta(adata, {"schema": {"treatment": {"role": "condition"}}})
-        result = dataset_overview(adata)
+        result = dataset_overview(adata).text
         assert "Cell types annotated:" not in result
 
     def test_cell_type_with_values_no_truncation(self, adata):
@@ -369,7 +371,7 @@ class TestCellTypesLine:
                 },
             },
         })
-        result = dataset_overview(adata)
+        result = dataset_overview(adata).text
         assert "Cell types annotated:" in result
         assert "3 types" in result
         assert "T cell" in result
@@ -390,7 +392,7 @@ class TestCellTypesLine:
                 },
             },
         })
-        result = dataset_overview(adata)
+        result = dataset_overview(adata).text
         assert "Cell types annotated:" in result
         assert "10 types" in result
         assert "T cell" in result
@@ -408,7 +410,7 @@ class TestCellTypesLine:
                 },
             },
         })
-        result = dataset_overview(adata)
+        result = dataset_overview(adata).text
         # First 5 appear
         for v in values[:5]:
             assert v in result
@@ -428,7 +430,7 @@ class TestCellTypesLine:
                 },
             },
         })
-        result = dataset_overview(adata)
+        result = dataset_overview(adata).text
         assert "Cell types annotated:" in result
         assert "7 types" in result
         assert "cell_type" in result  # column name appears
@@ -436,7 +438,7 @@ class TestCellTypesLine:
 
     def test_empty_schema_no_cell_types_line(self, adata):
         _set_meta(adata, {"schema": {}})
-        result = dataset_overview(adata)
+        result = dataset_overview(adata).text
         assert "Cell types annotated:" not in result
 
     def test_cell_type_n_unique_equals_values_length_no_ellipsis(self, adata):
@@ -451,7 +453,7 @@ class TestCellTypesLine:
                 },
             },
         })
-        result = dataset_overview(adata)
+        result = dataset_overview(adata).text
         assert "5 types" in result
         assert "…" not in result
         for v in values:
@@ -467,12 +469,12 @@ class TestAmbiguityQuestionsColumns:
 
     def test_no_ambiguous_cols_no_questions(self, adata):
         _set_meta(adata, {"schema": {}})
-        result = dataset_overview(adata)
+        result = dataset_overview(adata).text
         assert "I need your help" not in result
 
     def test_empty_ambiguous_cols_no_questions(self, adata):
         _set_meta(adata, {"ambiguous_cols": [], "schema": {}})
-        result = dataset_overview(adata)
+        result = dataset_overview(adata).text
         assert "I need your help" not in result
 
     def test_single_candidate_no_or(self, adata):
@@ -487,7 +489,7 @@ class TestAmbiguityQuestionsColumns:
                 },
             },
         })
-        result = dataset_overview(adata)
+        result = dataset_overview(adata).text
         assert "col1" in result
         assert "experimental condition" in result
         # "or" should NOT appear between candidates (only 1)
@@ -506,7 +508,7 @@ class TestAmbiguityQuestionsColumns:
                 },
             },
         })
-        result = dataset_overview(adata)
+        result = dataset_overview(adata).text
         assert "experimental condition" in result
         assert "batch label" in result
         assert " or " in result
@@ -523,7 +525,7 @@ class TestAmbiguityQuestionsColumns:
                 },
             },
         })
-        result = dataset_overview(adata)
+        result = dataset_overview(adata).text
         assert "experimental condition" in result
         assert "batch label" in result
         assert "sample ID" in result
@@ -542,7 +544,7 @@ class TestAmbiguityQuestionsColumns:
                 },
             },
         })
-        result = dataset_overview(adata)
+        result = dataset_overview(adata).text
         assert "some_future_role" in result
 
     def test_mixed_known_unknown_candidates(self, adata):
@@ -557,7 +559,7 @@ class TestAmbiguityQuestionsColumns:
                 },
             },
         })
-        result = dataset_overview(adata)
+        result = dataset_overview(adata).text
         assert "experimental condition" in result
         assert "novel_role" in result
 
@@ -573,7 +575,7 @@ class TestAmbiguityQuestionsColumns:
                 },
             },
         })
-        result = dataset_overview(adata)
+        result = dataset_overview(adata).text
         assert "ctrl" in result
         assert "drug" in result
 
@@ -588,7 +590,7 @@ class TestAmbiguityQuestionsColumns:
                 },
             },
         })
-        result = dataset_overview(adata)
+        result = dataset_overview(adata).text
         assert "8 unique values" in result
 
     def test_col_values_truncated_at_6_with_ellipsis(self, adata):
@@ -603,7 +605,7 @@ class TestAmbiguityQuestionsColumns:
                 },
             },
         })
-        result = dataset_overview(adata)
+        result = dataset_overview(adata).text
         assert "v1" in result
         assert "v6" in result
         assert "…" in result
@@ -616,7 +618,7 @@ class TestAmbiguityQuestionsColumns:
             "ambiguous_cols": ["ghost_col"],
             "schema": {},
         })
-        result = dataset_overview(adata)
+        result = dataset_overview(adata).text
         assert "ghost_col" in result
         # No values and no candidates → 'something' (the _join_candidates empty fallback)
         assert "something" in result
@@ -630,7 +632,7 @@ class TestAmbiguityQuestionsColumns:
                 "colB": {"candidates": ["batch"], "values": ["y"], "n_unique": 1},
             },
         })
-        result = dataset_overview(adata)
+        result = dataset_overview(adata).text
         assert "colA" in result
         assert "colB" in result
 
@@ -641,7 +643,7 @@ class TestAmbiguityQuestionsColumns:
                 "col1": {"candidates": ["condition"], "values": ["a"], "n_unique": 1},
             },
         })
-        result = dataset_overview(adata)
+        result = dataset_overview(adata).text
         assert "I need your help on a couple of things before we dive in:" in result
 
     def test_all_known_role_candidates_humanized(self, adata):
@@ -661,7 +663,7 @@ class TestAmbiguityQuestionsColumns:
                     "col1": {"candidates": [role], "values": [], "n_unique": 0},
                 },
             })
-            result = dataset_overview(adata)
+            result = dataset_overview(adata).text
             assert label in result, f"Role '{role}' should humanize to '{label}'"
 
 
@@ -680,7 +682,7 @@ class TestAmbiguityQuestionsSpecies:
                 "candidates": ["mouse", "rat"],
             },
         })
-        result = dataset_overview(adata)
+        result = dataset_overview(adata).text
         assert "Title-case" in result
         assert "Which is this dataset?" in result
 
@@ -692,7 +694,7 @@ class TestAmbiguityQuestionsSpecies:
                 "candidates": ["human", "mouse"],
             },
         })
-        result = dataset_overview(adata)
+        result = dataset_overview(adata).text
         assert "couldn't detect" in result
 
     def test_species_candidates_joined_with_or_for_two(self, adata):
@@ -703,7 +705,7 @@ class TestAmbiguityQuestionsSpecies:
                 "candidates": ["mouse", "rat"],
             },
         })
-        result = dataset_overview(adata)
+        result = dataset_overview(adata).text
         assert "mouse or rat" in result
 
     def test_species_candidates_oxford_for_three(self, adata):
@@ -714,7 +716,7 @@ class TestAmbiguityQuestionsSpecies:
                 "candidates": ["human", "mouse", "rat"],
             },
         })
-        result = dataset_overview(adata)
+        result = dataset_overview(adata).text
         assert ", or " in result
 
     def test_species_empty_candidates_shows_something(self, adata):
@@ -726,7 +728,7 @@ class TestAmbiguityQuestionsSpecies:
                 "candidates": [],
             },
         })
-        result = dataset_overview(adata)
+        result = dataset_overview(adata).text
         assert "something" in result
 
     def test_species_single_candidate_no_or(self, adata):
@@ -737,7 +739,7 @@ class TestAmbiguityQuestionsSpecies:
                 "candidates": ["human"],
             },
         })
-        result = dataset_overview(adata)
+        result = dataset_overview(adata).text
         assert "human" in result
         assert "human or " not in result
 
@@ -749,7 +751,7 @@ class TestAmbiguityQuestionsSpecies:
                 "source": "declared", "candidates": [],
             },
         })
-        result = dataset_overview(adata)
+        result = dataset_overview(adata).text
         assert "Title-case" not in result
         assert "couldn't detect" not in result
 
@@ -787,7 +789,7 @@ class TestFullMeta:
 
     def test_all_lines_present(self, adata):
         _set_meta(adata, self._full_meta())
-        result = dataset_overview(adata)
+        result = dataset_overview(adata).text
         assert "Dataset:" in result
         assert "Species:" in result
         assert "Conditions detected:" in result
@@ -795,7 +797,7 @@ class TestFullMeta:
 
     def test_no_ambiguity_section_when_nothing_ambiguous(self, adata):
         _set_meta(adata, self._full_meta())
-        result = dataset_overview(adata)
+        result = dataset_overview(adata).text
         assert "I need your help" not in result
 
     def test_partial_meta_species_and_conditions_only(self, adata):
@@ -805,7 +807,7 @@ class TestFullMeta:
             "condition_cols": ["group"],
             "schema": {"group": {"values": ["A", "B"], "n_unique": 2}},
         })
-        result = dataset_overview(adata)
+        result = dataset_overview(adata).text
         assert "Species: mouse" in result
         assert "Conditions detected:" in result
         assert "Cell types annotated:" not in result
@@ -820,7 +822,7 @@ class TestFullMeta:
             },
             "ambiguous_cols": ["mystery"],
         })
-        result = dataset_overview(adata)
+        result = dataset_overview(adata).text
         assert "Conditions detected:" in result
         assert "mystery" in result
         assert "I need your help" in result
@@ -836,7 +838,7 @@ class TestFullMeta:
                 "candidates": ["mouse", "rat"],
             },
         })
-        result = dataset_overview(adata)
+        result = dataset_overview(adata).text
         assert "Cell types annotated:" in result
         assert "Title-case" in result
 
@@ -850,12 +852,12 @@ class TestReturnValueStructure:
 
     def test_returns_string(self, adata):
         _clear_meta(adata)
-        result = dataset_overview(adata)
+        result = dataset_overview(adata).text
         assert isinstance(result, str)
 
     def test_header_is_first_line(self, adata):
         _clear_meta(adata)
-        result = dataset_overview(adata)
+        result = dataset_overview(adata).text
         lines = result.split("\n")
         assert lines[0].startswith("Dataset:")
 
@@ -867,7 +869,7 @@ class TestReturnValueStructure:
                 "col1": {"candidates": ["condition"], "values": ["a", "b"], "n_unique": 2},
             },
         })
-        result = dataset_overview(adata)
+        result = dataset_overview(adata).text
         lines = result.split("\n")
         # Find the "I need your help" line index
         help_idx = next(i for i, l in enumerate(lines) if "I need your help" in l)
@@ -881,7 +883,7 @@ class TestReturnValueStructure:
                 "col1": {"candidates": ["condition"], "values": ["x"], "n_unique": 1},
             },
         })
-        result = dataset_overview(adata)
+        result = dataset_overview(adata).text
         lines = result.split("\n")
         q_lines = [l for l in lines if l.startswith("- ")]
         assert len(q_lines) >= 1
@@ -889,7 +891,7 @@ class TestReturnValueStructure:
     def test_cell_gene_counts_formatted(self, adata):
         """n_obs and n_vars appear in the header formatted with comma separators."""
         _clear_meta(adata)
-        result = dataset_overview(adata)
+        result = dataset_overview(adata).text
         # The format is "{n_obs:,} cells × {n_vars:,} genes"
         assert f"{adata.n_obs:,}" in result
         assert f"{adata.n_vars:,}" in result
@@ -899,7 +901,7 @@ class TestReturnValueStructure:
             "condition_cols": ["treatment"],
             "schema": {"treatment": {"values": ["ctrl"], "n_unique": 1}},
         })
-        result = dataset_overview(adata)
+        result = dataset_overview(adata).text
         for line in result.split("\n"):
             if "Conditions detected:" in line:
                 assert line.endswith(".")
@@ -911,7 +913,7 @@ class TestReturnValueStructure:
                 "cell_type": {"role": "cell_type", "n_unique": 2, "values": ["A", "B"]},
             },
         })
-        result = dataset_overview(adata)
+        result = dataset_overview(adata).text
         for line in result.split("\n"):
             if "Cell types annotated:" in line:
                 assert line.endswith(".")

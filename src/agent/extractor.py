@@ -16,12 +16,12 @@ import os
 
 from openai import OpenAI
 
-# Importing src.tools triggers @register side-effects from family modules so REGISTRY
+# Importing src.domain triggers @register side-effects from family modules so REGISTRY
 # is populated before extractor reads it. Safe to keep even if app already imported it.
-import src.tools  # noqa: F401
+import src.domain  # noqa: F401
 
 from src.core.spec import Spec
-from src.tools.registry import REGISTRY, get_tool_names
+from src.core.registry import REGISTRY, get_tool_names
 
 logger = logging.getLogger(__name__)
 

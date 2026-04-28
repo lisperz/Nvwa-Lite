@@ -1,4 +1,9 @@
-"""Tool registry — self-registering catalog for the spec pipeline."""
+"""Tool registry — self-registering catalog for the spec pipeline.
+
+Lives in src/core/ alongside spec.py / results.py / types.py because it's pure
+infrastructure (a dict of ToolEntry dataclasses + a decorator that populates it).
+Bio-knowledge tool bodies in src/domain/<section>.py import @register from here.
+"""
 
 import inspect
 from dataclasses import dataclass

@@ -1,15 +1,23 @@
-"""Inspection tools — summarize / describe / check the loaded dataset.
+"""Agent utility / dataset-discovery tools.
 
-First file populated under the new tool registry (`src/tools/registry.py`).
-T-040 will migrate legacy inspection tools (dataset_info, check_data_status,
-inspect_metadata, DE tables, cluster_mapping) into this file later.
+Per local/product/tool_migration_map.md: this module hosts tools that don't
+map to a Yalu Layer 1 user scenario — they're agent helpers for inspecting
+the loaded dataset (column structure, processing state, cluster mapping, etc.).
+
+Currently:
+  - dataset_overview
+
+Future (per migration map):
+  - dataset_info, check_data_status, inspect_metadata, get_cluster_mapping,
+    summarize_obs_column, calculate_average_expression
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from src.tools.registry import register
+from src.core.registry import register
+from src.core.results import TextResult
 
 if TYPE_CHECKING:
     from anndata import AnnData
@@ -35,7 +43,7 @@ _ROLE_HUMAN: dict[str, str] = {
         "/ per-condition counts or aggregations — those require a different tool."
     ),
 )
-def dataset_overview(adata: "AnnData") -> str:
+def dataset_overview(adata: "AnnData") -> TextResult:
     """Render a human-readable overview of the loaded dataset.
 
     Reads `adata.uns["nvwa_meta"]` (populated by column_classifier + species_detector
@@ -66,7 +74,7 @@ def dataset_overview(adata: "AnnData") -> str:
         lines.append("I need your help on a couple of things before we dive in:")
         lines.extend(questions)
 
-    return "\n".join(lines)
+    return TextResult(text="\n".join(lines))
 
 
 def _get_meta(adata: "AnnData") -> dict[str, Any]:
