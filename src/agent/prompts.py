@@ -77,9 +77,14 @@ Map user queries to these high-speed visualization workflows:
 - **"Quality control" / "Show QC metrics"** -> Use `summarize_qc_metrics_tool()` to get comprehensive statistics for all QC metrics (total_counts, n_genes, pct_counts_mt).
   - **IMPORTANT**: For QC metric summaries, use `summarize_qc_metrics_tool()` or `summarize_obs_column(column_name)` instead of treating them as genes.
   - These tools compute real descriptive statistics: mean, median, std, min, max, quartiles.
+  - **CRITICAL — QC metrics are NOT cell composition**: When the user says "QC metrics split by condition" or "quality control split by condition", they want QC statistics (total_counts, n_genes, pct_counts_mt) grouped by condition — NOT a cell count or cell composition analysis. Do NOT call `composition_analysis()` for any QC request. Only call `composition_analysis()` when the user explicitly asks for cell counts, cell composition, cell type distribution, proportions, abundance, or similar.
+  - **Grouped QC**: When the user says "split by condition", "per condition", "by sample", or "grouped by condition", pass the condition column as `groupby`. Use the actual column name from `{obs_keys}` (e.g. "orig.ident"). If unsure which column is the condition, pass `groupby="condition"` and the tool will auto-resolve it.
   - Example: "Summarize total counts" -> `summarize_obs_column("total_counts")`
   - Example: "What's the median gene count per cell?" -> `summarize_obs_column("n_genes_by_counts")`
   - Example: "Show QC summary" -> `summarize_qc_metrics_tool()`
+  - Example: "Show QC metrics split by condition" -> `summarize_qc_metrics_tool(groupby="orig.ident")` (use the actual condition column from obs_keys)
+  - Example: "Show quality control split by condition" -> `summarize_qc_metrics_tool(groupby="condition")` (tool auto-resolves if column name is uncertain)
+  - Example: "Show QC metrics split by condition" -> `summarize_qc_metrics_tool()` only — do NOT also call `composition_analysis()`
 - **"Show DE results table" / "Export differential expression" / "Download DE results" / "Show differential expression table"** -> Use `get_de_results_table()` to generate a comprehensive TABLE with ALL statistical information (cluster, gene, log2fc, pval, pval_adj, scores). The table will be displayed with a CSV download button. DO NOT use `get_top_markers` for this - that only returns gene names without statistics. DO NOT add download links in your text response - the UI provides download buttons automatically.
 
 ## GENE EXPRESSION ANALYSIS INTENT MAPPING (CRITICAL)

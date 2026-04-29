@@ -208,3 +208,73 @@ def test_ceo_test_cases(prompt, expected_layer, expected_tool):
             f"CEO test case failed for: '{prompt}'\n"
             f"Expected task_type='{expected_tool}', got='{result.task_type}'"
         )
+
+
+# ---------------------------------------------------------------------------
+# QC vs composition routing — regression tests for the "split by condition"
+# conflation bug. "QC metrics split by condition" must route to the QC tool,
+# not to umap_plot (which owns the "split by" keyword).
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("prompt,expected_tool,expected_matched_on", [
+    # Exact reproduction prompt from the bug report
+    (
+        "Show the QC metrics for all cells, split by condition.",
+        "summarize_qc_metrics_tool",
+        "qc metrics",
+    ),
+    # Synonym: "quality control" instead of "qc metrics"
+    (
+        "Show quality control split by condition",
+        "summarize_qc_metrics_tool",
+        "quality control",
+    ),
+    # Plain QC request without "split by" — must not regress
+    (
+        "Show QC metrics",
+        "summarize_qc_metrics_tool",
+        "qc metrics",
+    ),
+    # "qc summary" keyword
+    (
+        "Give me a QC summary split by condition",
+        "summarize_qc_metrics_tool",
+        "qc summary",
+    ),
+])
+def test_qc_split_by_condition_routes_to_qc_tool(prompt, expected_tool, expected_matched_on):
+    """QC intent must win over the generic 'split by' visualization keyword."""
+    result = classify_intent(prompt)
+    assert result.layer == "2a", (
+        f"Expected layer '2a' for: '{prompt}'\n"
+        f"Got layer='{result.layer}', matched_on='{result.matched_on}'"
+    )
+    assert result.task_type == expected_tool, (
+        f"Expected task_type='{expected_tool}' for: '{prompt}'\n"
+        f"Got task_type='{result.task_type}', matched_on='{result.matched_on}'"
+    )
+    assert result.matched_on == expected_matched_on, (
+        f"Expected matched_on='{expected_matched_on}' for: '{prompt}'\n"
+        f"Got matched_on='{result.matched_on}'"
+    )
+
+
+@pytest.mark.parametrize("prompt,expected_tool", [
+    # "split by" without QC context must still route to umap_plot
+    ("Show UMAP split by condition",                    "umap_plot"),
+    ("Plot a UMAP split by condition",                  "umap_plot"),
+    ("Show me the embedding split by sample",           "umap_plot"),
+    # Composition requests must still route correctly (ambiguous → LangChain)
+    # These do not match any keyword in TOOL_INTENT_MAP, so they fall through
+    # to the LangChain loop where composition_analysis is available.
+    # We verify they do NOT accidentally route to the QC tool.
+    ("Show cell composition split by condition",        "umap_plot"),  # "split by" matches
+])
+def test_non_qc_split_by_routes_preserved(prompt, expected_tool):
+    """Existing 'split by' routing for non-QC prompts must not regress."""
+    result = classify_intent(prompt)
+    assert result.layer == "2a"
+    assert result.task_type == expected_tool, (
+        f"Expected task_type='{expected_tool}' for: '{prompt}'\n"
+        f"Got task_type='{result.task_type}', matched_on='{result.matched_on}'"
+    )
