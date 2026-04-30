@@ -25,19 +25,30 @@
 - **§3B.4, §3B.5 (Violin subset)**: same pattern.
 - **§3C.3, §3C.4 (Dot plot subset)**: same pattern.
 
+## Mismatch — Yalu Layer 3 output contract vs implementation
+
+- **§6 composition: legacy CSV+plot → spec-pipeline image-only** — Legacy `composition_analysis` returned both a count CSV table AND a stacked bar chart. Yalu Layer 3 spec for `composition_barplot` shows image-only (matplotlib `plt.savefig`); the new spec-pipeline implementation matches Yalu spec → no CSV. Post-legacy purge, users lose CSV access for composition. Yalu hasn't stated whether CSV output is intentionally dropped or just unspecified. **Proposed fix:** Yalu confirm intent — image-only is final, OR add a §6 CSV scenario (e.g. "Show the cell counts table for cell type × condition" → `composition_barplot` returns CSV instead of image). (Surfaced 2026-04-29 via §6 PR shipping decision.)
+
+## Prompt ambiguity / disambiguator keywords
+
+- **§3A.3 / §3A.4 vs §3B.4 / §3B.5** — §3A.1 / §3A.2 disambiguate from §3B via "on the UMAP". §3A.3 / §3A.4 drop this keyword, leaving the differentiator as "split by" (§3A.4) vs "grouped by" (§3B.4) — too subtle for reliable LLM extraction across variance. Empirically the extractor mis-routes L1-3A.4 to `violin_plot`. Adding a §3A.4 few-shot caused over-generalization that broke §3B.4 / §3B.5 routing — closed feedback loop, no fixed point via few-shot patching. **Proposed fix:** add "on the UMAP" to §3A.3 / §3A.4 prompts to restore the keyword disambiguator already used in §3A.1 / §3A.2. (Surfaced 2026-04-29 via L1-3A.4 regression failure.)
+
 ## Symbolic vs concrete column names
 
 - Yalu Layer 2/3 use symbolic constants `CELLTYPE_COL`, `CONDITION_COL` for obs columns. Real datasets use varied names (`cell_type`, `celltype`, `annotation`, `label` for cell-type; `orig.ident`, `condition`, `sample`, `batch` for condition). Yalu's docs need a "column resolution standard" section explaining how implementations map the symbolic constants to actual column names per dataset (or accept that the migration handles it via resolver).
 
 ## Underspecified scenarios
 
-- **§3D.5 "Multiple genes · Grouped by condition · Individual cell level"** — Yalu notes "Individual cell level, not aggregated", but `sc.pl.heatmap(groupby=CONDITION_COL)` aggregates by default. Either the spec should call out the rendering mode (cell-level vs aggregated) explicitly, or §3D.5 collapses to §3D.1 with a different groupby.
+- **§3D.5 "Multiple genes · Grouped by condition · Individual cell level"** — Yalu notes "Individual cell level, not aggregated", but `sc.pl.heatmap(groupby=CONDITION_COL)` aggregates by default. Either the spec should call out the rendering mode (cell-level vs aggregated) explicitly, or §3D.5 collapses to §3D.1 with a different groupby. Re-confirmed 2026-04-29 by L1-3D.5 regression test (set to `expected_status: WARN`); current implementation falls back to aggregated rendering.
 - **`reference` param** in Yalu split tools (heatmap_split, feature_split, violin_split) — no user prompt examples in Layer 1 show how the user signals the reference/control condition. Without a prompt convention, the LLM can't extract `reference`. Yalu needs example prompts: "compare A and B with A as control" → `reference="A"`.
+- **Post-`find_all_markers` visualization workflow** — Yalu Layer 1 lists "top marker genes" as a valid input alternative in §3C.1, §3C.2, §3D.1, §3D.2 plus the §4.3 workflow itself, implying an "after `find_all_markers`, plot top markers as dot plot / heatmap" flow. But Yalu Layer 2 documents no explicit follow-up offer (compare to §5's "Would you like a volcano plot?" pattern). Open: does `find_all_markers` emit a "show as dot plot / heatmap?" offer line? Does the agent silently auto-run when user requests "top markers" plot without prior state? **Proposed fix:** Yalu §4 add a "Nvwa will offer to plot the top markers as a dot plot or heatmap" sentence — symmetric to §5's volcano-offer pattern. (Surfaced 2026-04-29 via §3C/§3D/§4 cross-reference.)
 
 ## LLM-extraction conventions not specified
 
 - **Gene name normalization** — Yalu Layer 3 uses bare symbols (`CD3D`, `MS4A1`). Real users may pass lowercase (`cd3d`), aliases, or partial matches (`CD3` for CD3 family). No spec on whether broad-term expansion (`CD3` → `CD3D, CD3E, CD3G`) should clarify or assume.
 - **Cell-type broad terms** — Yalu §1.3 example "Show the UMAP for [Cell Type A] and [Cell Type B] only" uses placeholder names. No guidance on what happens when user says "cardiomyocytes" against a dataset with `Early cardiomyocyte, Ventricular cardiomyocyte` — clarification turn or assume all-matching? (Implementation chose clarification.)
+- **Multi-gene "show expression" without plot-type keyword — default unspecified** — Real customer prompts often skip the plot-type keyword (e.g. DAI-04 "can you show me the gene expression for Fabp4 and Fabp5"). The extractor currently defaults to `dot_plot` (matching §3C's "efficient multi-gene overview" framing). Yalu Layer 1 doesn't articulate this default. **Proposed fix:** Yalu §3 (intro) or §3C add: "When asking to visualize multiple genes without specifying a plot type, Nvwa defaults to a dot plot. Specify 'heatmap' or 'violin' for alternatives." (Surfaced 2026-04-29 via DAI-04.)
+- **Single-gene "compare expression of [gene] between [conds]" — viz vs DE compute** — Yalu §5 covers genome-wide DE between conditions (table output). But "compare the gene expression of [single gene] between [conds]" (DAI-07 / DAI-09 / DAI-10 / DAI-11 phrasings) linguistically resembles §5 while semantically being a §3B-shape visualization request. The extractor can mis-route to `run_de` (table, not single-gene plot). **Proposed fix:** Yalu §3B add an explicit example "compare the gene expression of [gene] between [conds]" → `violin_plot`, NOT `run_de`. Or add a global note distinguishing single-gene visual comparison from DE genome-wide compute. (Surfaced 2026-04-29 via DAI-07/09/10/11.)
 
 ## Subset_data tool exposure
 
