@@ -109,6 +109,7 @@ def get_obs_column_statistics(
 def summarize_qc_metrics(
     adata: AnnData,
     metric_names: list[str] | None = None,
+    groupby: str | None = None,
 ) -> pd.DataFrame:
     """Summarize multiple QC metrics with descriptive statistics.
 
@@ -116,10 +117,21 @@ def summarize_qc_metrics(
         adata: The annotated data matrix.
         metric_names: List of metric names to summarize. If None, auto-detects
                      common QC metrics (total_counts, n_genes, pct_counts_mt).
+        groupby: Optional obs column to group by. When set, returns one row per
+                 (group × metric) with a leading 'group' column.
 
     Returns:
-        DataFrame with one row per metric, columns for each statistic.
+        DataFrame with one row per metric (global) or per group × metric (grouped).
+
+    Raises:
+        ValueError: If groupby column is not found in adata.obs.
     """
+    if groupby is not None and groupby not in adata.obs.columns:
+        available = ", ".join(sorted(adata.obs.columns))
+        raise ValueError(
+            f"Column '{groupby}' not found in adata.obs. Available columns: {available}"
+        )
+
     if metric_names is None:
         # Auto-detect common QC metrics
         metric_names = []
@@ -141,9 +153,28 @@ def summarize_qc_metrics(
     if not metric_names:
         raise ValueError("No QC metrics found in adata.obs")
 
+    if groupby is None:
+        return _summarize_subset(adata, metric_names)
+
+    groups = sorted(adata.obs[groupby].dropna().unique().tolist(), key=str)
+    group_frames: list[pd.DataFrame] = []
+    for group_val in groups:
+        mask = adata.obs[groupby] == group_val
+        subset = adata[mask]
+        group_df = _summarize_subset(subset, metric_names)
+        group_df.insert(0, "group", str(group_val))
+        group_frames.append(group_df)
+
+    if not group_frames:
+        raise ValueError(f"No groups found in column '{groupby}'")
+
+    return pd.concat(group_frames, ignore_index=True)
+
+
+def _summarize_subset(adata: AnnData, metric_names: list[str]) -> pd.DataFrame:
+    """Compute per-metric statistics for a single (possibly subsetted) AnnData."""
     results = []
     for metric in metric_names:
-        # Resolve metric name
         resolved = resolve_qc_metric_column(adata, metric)
         if resolved is None:
             logger.warning(f"Could not resolve metric '{metric}', skipping")
@@ -161,8 +192,5 @@ def summarize_qc_metrics(
         raise ValueError("No valid QC metrics could be summarized")
 
     df = pd.DataFrame(results)
-    # Reorder columns to put metric first
     cols = ["metric"] + [c for c in df.columns if c != "metric"]
-    df = df[cols]
-
-    return df
+    return df[cols]

@@ -23,6 +23,7 @@ from src.domain.analysis.differential import get_de_dataframe, run_differential_
 from src.domain.analysis.marker_genes import get_top_marker_genes_per_cluster
 from src.domain.analysis.preprocessing import run_preprocessing
 from src.domain.analysis.qc_metrics import get_obs_column_statistics, resolve_qc_metric_column, summarize_qc_metrics
+from src.domain.resolver.condition_lookup import _get_condition_cols
 from src.platform.observability.uns_snapshot import emit_uns_snapshot
 from src.domain.plotting.comparison import plot_dotplot, plot_heatmap, plot_scatter
 from src.domain.plotting.composition import plot_composition
@@ -1104,19 +1105,25 @@ def summarize_obs_column(column_name: str) -> str:
 
 
 @tool
-def summarize_qc_metrics_tool() -> str:
-    """Summarize all common QC metrics in the dataset.
+def summarize_qc_metrics_tool(groupby: str = "") -> str:
+    """Summarize all common QC metrics in the dataset, optionally grouped by a condition column.
 
     Use this tool when users ask for:
     - "Show QC summary"
     - "Summarize quality control metrics"
     - "What are the QC statistics?"
     - "Show me total counts and gene counts"
+    - "Show QC metrics split by condition" -> use groupby=<condition_column>
 
     Automatically detects and summarizes common QC metrics:
     - Total counts / UMI depth (total_counts, n_counts, nCount_RNA)
     - Number of genes expressed (n_genes_by_counts, n_genes, nFeature_RNA)
     - Mitochondrial percentage (pct_counts_mt, percent.mt)
+
+    Args:
+        groupby: Optional obs column to group by (e.g. "orig.ident", "condition").
+                 Pass "condition" to auto-resolve to the dataset's condition column.
+                 Leave empty for a global summary.
 
     Returns:
         Formatted table with statistics for all detected QC metrics.
@@ -1124,15 +1131,29 @@ def summarize_qc_metrics_tool() -> str:
     adata = _get_adata()
 
     try:
-        df = summarize_qc_metrics(adata)
+        resolved_groupby = _resolve_groupby(adata, groupby) if groupby else None
+
+        df = summarize_qc_metrics(adata, groupby=resolved_groupby)
 
         csv_buffer = io.StringIO()
         df.to_csv(csv_buffer, index=False)
 
+        if resolved_groupby:
+            n_groups = df["group"].nunique()
+            code = f'summarize_qc_metrics_tool(groupby="{resolved_groupby}")'
+            message = (
+                f"QC metrics summary grouped by '{resolved_groupby}' "
+                f"({n_groups} groups, {len(df)} rows)."
+            )
+        else:
+            n_metrics = len(df)
+            code = "summarize_qc_metrics_tool()"
+            message = f"QC metrics summary for {adata.n_obs:,} cells ({n_metrics} metrics detected)."
+
         table = TableResult(
             csv_data=csv_buffer.getvalue(),
-            code="summarize_qc_metrics_tool()",
-            message=f"QC metrics summary for {adata.n_obs:,} cells ({len(df)} metrics detected).",
+            code=code,
+            message=message,
             display_df=df.to_markdown(index=False),
         )
         return _store_table_and_return(table)
@@ -1142,6 +1163,38 @@ def summarize_qc_metrics_tool() -> str:
     except Exception as e:
         logger.exception("Summarize QC metrics failed")
         return f"Error: Unexpected — {e}"
+
+
+def _resolve_groupby(adata: "AnnData", groupby: str) -> str:
+    """Resolve a groupby string to an actual obs column.
+
+    If groupby is a generic term like "condition", resolves to the first
+    condition column declared in adata.uns["nvwa_meta"]. Otherwise validates
+    the column exists directly.
+    """
+    _GENERIC_CONDITION_TERMS = {"condition", "conditions", "sample", "samples", "group", "groups"}
+
+    if groupby.lower() in _GENERIC_CONDITION_TERMS:
+        condition_cols = _get_condition_cols(adata)
+        for col in condition_cols:
+            if col in adata.obs.columns:
+                return col
+        # Fallback: look for orig.ident which is common in Seurat-derived datasets
+        if "orig.ident" in adata.obs.columns:
+            return "orig.ident"
+        available = ", ".join(sorted(adata.obs.columns))
+        raise ValueError(
+            f"Could not resolve '{groupby}' to a condition column. "
+            f"Available columns: {available}"
+        )
+
+    if groupby not in adata.obs.columns:
+        available = ", ".join(sorted(adata.obs.columns))
+        raise ValueError(
+            f"Column '{groupby}' not found in adata.obs. Available columns: {available}"
+        )
+
+    return groupby
 
 
 @tool

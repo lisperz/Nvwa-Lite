@@ -60,6 +60,14 @@ LAYER_2B_PATTERNS: list[str] = [
 # All keywords matched as case-insensitive substrings.
 # ---------------------------------------------------------------------------
 TOOL_INTENT_MAP: list[tuple[str, set[str]]] = [
+    # --- QC (must come before generic visualization keywords like "split by") ---
+    ("calculate_mito_pct", {
+        "mitochondrial", "mito percentage", "mito pct", "mt genes", "mito genes",
+    }),
+    ("summarize_qc_metrics_tool", {
+        "qc metrics", "quality control", "qc summary",
+        "read depth",
+    }),
     # --- Visualization ---
     # highlight_cluster and feature_plot must come before umap_plot —
     # their prompts often contain "umap" as context, not as the task.
@@ -131,14 +139,6 @@ TOOL_INTENT_MAP: list[tuple[str, set[str]]] = [
     ("get_cluster_mapping", {
         "cluster mapping", "cluster names", "cluster ids",
         "what are the clusters", "cluster annotation", "list clusters",
-    }),
-    # --- QC ---
-    ("calculate_mito_pct", {
-        "mitochondrial", "mito percentage", "mito pct", "mt genes", "mito genes",
-    }),
-    ("summarize_qc_metrics_tool", {
-        "qc metrics", "quality control", "qc summary",
-        "read depth", "genes per cell",
     }),
     # --- Export ---
     ("get_de_results_table", {
