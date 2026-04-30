@@ -278,3 +278,29 @@ def test_non_qc_split_by_routes_preserved(prompt, expected_tool):
         f"Expected task_type='{expected_tool}' for: '{prompt}'\n"
         f"Got task_type='{result.task_type}', matched_on='{result.matched_on}'"
     )
+
+
+# ---------------------------------------------------------------------------
+# Dot plot routing — plain cell-type vs condition-split
+# Regression guard for: "across all cell types" must NOT route to dotplot_matrix.
+# dotplot_matrix is only triggered by explicit condition comparison language.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("prompt", [
+    "Show a dot plot of Nppa, Nppb, Myh7, Myh6 across all cell types",
+    "Show a dot plot of top marker genes across cell types",
+    "Generate a dotplot for CD3E across different cell types",
+    "Dot plot of MKI67 across all clusters",
+    "Show a bubble plot of TNNT2 across cell types",
+])
+def test_dotplot_plain_cell_type_routes_to_dotplot(prompt):
+    """Plain 'across cell types' without condition language must route to dotplot, not dotplot_matrix."""
+    result = classify_intent(prompt)
+    assert result.layer == "2a", (
+        f"Expected layer '2a' for: '{prompt}'\n"
+        f"Got layer='{result.layer}', matched_on='{result.matched_on}'"
+    )
+    assert result.task_type == "dotplot", (
+        f"Expected task_type='dotplot' for: '{prompt}'\n"
+        f"Got task_type='{result.task_type}', matched_on='{result.matched_on}'"
+    )

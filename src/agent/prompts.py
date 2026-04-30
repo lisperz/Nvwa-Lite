@@ -141,21 +141,22 @@ Analysis approach:
 3. Provide quantitative comparison of the specified conditions
 
 **Type B: Cross-Cell-Type Comparison Questions**
-Pattern: "[gene] across [multiple/different cell types] in [condition context]"
+Pattern: "[gene] across [multiple/different cell types]" with optional explicit condition comparison.
 Examples:
 - "How does NKX2-5 vary across different cell types in disease vs normal?"
 - "NKX2-5 expression in all cell types, comparing PA-IVS to control"
 - "Show me NKX2-5 across cell types"
 
 Analysis approach:
-1. Use `dotplot_matrix(genes="NKX2-5", cell_type_key=<cell_type_col>, condition_key=<condition_col>)` as PRIMARY visualization
-2. This creates a matrix-style plot: cell types grouped by condition on x-axis, gene on y-axis
-3. Do NOT default to a single-cell-type subset for these questions
-4. Optionally add `feature_plot` for spatial context if helpful
+1. If user explicitly requests condition comparison/splitting ("split by condition", "disease vs normal", "control vs mutant", "across cell types and conditions"), use `dotplot_matrix(genes="NKX2-5", cell_type_key=<cell_type_col>, condition_key=<condition_col>)`.
+2. If user asks only "across cell types" without explicit condition language, use `dotplot(genes="NKX2-5", groupby=<cell_type_col>)`.
+3. Do NOT default to a single-cell-type subset for these questions.
+4. Optionally add `feature_plot` for spatial context if helpful.
 
 **Key distinction:**
 - "in [cell type]" → Type A (subset-focused)
-- "across [cell types]" or "different cell types" → Type B (cross-cell-type comparison)
+- "across [cell types]" + explicit condition comparison/split language → Type B matrix (`dotplot_matrix`)
+- "across [cell types]" only (no condition language) → single-dimension cell-type dot plot (`dotplot`)
 
 ### Constraint Types to Detect
 1. **Gene constraint**: which gene to measure (e.g., "TNNT2")
@@ -227,7 +228,7 @@ When the user asks "Is there a difference between X and Y?", your response MUST:
 Do NOT end with only "Would you like to explore further?" — always answer the biological question FIRST.
 
 ### Choosing Between Violin Plot and Dot Plot
-- **`dotplot_matrix`**: PRIMARY choice for **Type B (cross-cell-type)** questions. Use when user asks about "different cell types" or "multiple cell types" in disease vs normal. Creates a hierarchical matrix layout (cell types × conditions on x-axis, genes on y-axis).
+- **`dotplot_matrix`**: PRIMARY choice for **Type B (cross-cell-type + explicit condition comparison/split)** questions. Use when user explicitly asks for condition comparison or split (e.g., "disease vs normal", "control vs mutant", "split by condition", "across cell types and conditions"). Creates a hierarchical matrix layout (cell types × conditions on x-axis, genes on y-axis).
 - **`subset_violin_plot`**: PRIMARY choice for **Type A (cell-type-focused)** questions. Use when user asks about expression within ONE specific cell type across conditions. Shows distribution shape per group.
 - **`dotplot_combined`**: Fallback when `dotplot_matrix` is insufficient. Creates a flat combined-label list (format: "<cell_type> + <condition>") — less readable than `dotplot_matrix` for matrix comparisons.
 - For questions like "Is there a difference between <condA> and <condB> <cell_type>?":
@@ -278,7 +279,8 @@ Correct conclusion format:
 - If user says "split by condition" → the plot MUST be split. Do NOT generate unsplit plots.
 - If user says "in <cell_type>" (with a real cell-type value) → the analysis MUST be restricted. Do NOT analyze all cells.
 - If user asks about "[groupA] vs [groupB] [cell type]" → conclusion MUST be about that cell type only.
-- If user says "across different cell types" or "across cell types" → use `dotplot_matrix`, NOT `subset_violin_plot`.
+- If user says "across different cell types" or "across cell types" WITH explicit condition comparison/split language → use `dotplot_matrix`, NOT `subset_violin_plot`.
+- If user says "across different cell types" or "across cell types" WITHOUT condition comparison/split language → use `dotplot` grouped by the cell-type column.
 
 ## CRITICAL: DIFFERENTIAL EXPRESSION DECISION LOGIC
 
