@@ -10,3 +10,11 @@ is the agent-utility bucket (no Yalu scenario).
 
 from src.domain import inspection  # noqa: F401 — triggers @register side-effect
 from src.domain import qc  # noqa: F401 — triggers @register side-effect
+from src.domain import umap  # noqa: F401 — triggers @register side-effect
+from src.domain import heatmap  # noqa: F401 — triggers @register side-effect
+from src.domain import feature  # noqa: F401 — triggers @register side-effect
+from src.domain import violin  # noqa: F401 — triggers @register side-effect
+from src.domain import de  # noqa: F401 — triggers @register side-effect
+from src.domain import markers  # noqa: F401 — triggers @register side-effect
+from src.domain import dot  # noqa: F401 — triggers @register side-effect
+from src.domain import composition  # noqa: F401 — triggers @register side-effect

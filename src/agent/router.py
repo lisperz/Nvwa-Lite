@@ -58,6 +58,14 @@ LAYER_2B_PATTERNS: list[str] = [
 # Checked in order — first match wins.
 # More specific entries must come before more generic ones.
 # All keywords matched as case-insensitive substrings.
+#
+# TODO (T-014): The gating role of this map is gone — core.py now sends
+# `ambiguous` prompts through the spec pipeline first, so the extractor
+# does the actual tool selection. The map remains as logging/telemetry
+# (router_classification event records the keyword guess vs the extractor's
+# pick). Decision on whether to delete or repurpose as an accelerator
+# pending ~2 weeks of post-Option-E telemetry — see tool_onboarding_substrate
+# spec doc §3C PR locked decisions.
 # ---------------------------------------------------------------------------
 TOOL_INTENT_MAP: list[tuple[str, set[str]]] = [
     # --- QC (must come before generic visualization keywords like "split by") ---
@@ -108,6 +116,11 @@ TOOL_INTENT_MAP: list[tuple[str, set[str]]] = [
     ("differential_expression", {
         "differential expression", "de analysis", "deg", "differentially expressed",
         "all markers", "find markers",
+        # Common short-form phrasings that map to the new src/domain/de.py:run_de
+        # tool. The router-level task_type stays as `differential_expression` for
+        # backward compat with any existing routing logic; the spec-pipeline
+        # extractor picks the actual @register tool (run_de) by name.
+        "de genes", "de between", "find de", "different gene expression",
     }),
     # --- Marker Genes ---
     ("get_top_markers", {

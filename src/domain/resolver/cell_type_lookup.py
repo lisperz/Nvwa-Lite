@@ -20,17 +20,48 @@ class CellTypeLookupResult:
     message: str = ""
 
 
+_CELL_TYPE_COL_CANDIDATES: tuple[str, ...] = (
+    "cell_type", "celltype", "annotation", "label",
+)
+
+
+def _resolve_cell_type_col(adata: "AnnData", obs_col: str | None) -> str | None:
+    """Resolve which obs column holds cell-type labels.
+
+    Caller-supplied ``obs_col`` wins when present in adata.obs. Otherwise
+    walks the candidate list (matches the obs_column resolver's semantic
+    map for cell-type columns).
+    """
+    if obs_col is not None and obs_col in adata.obs.columns:
+        return obs_col
+    for cand in _CELL_TYPE_COL_CANDIDATES:
+        if cand in adata.obs.columns:
+            return cand
+    return None
+
+
 def lookup_cell_type_name(
     adata: "AnnData",
     raw: str,
-    obs_col: str = "cell_type",
+    obs_col: str | None = None,
 ) -> CellTypeLookupResult:
-    """Resolve a cell-type string against adata.obs[obs_col] unique values."""
-    if obs_col not in adata.obs.columns:
+    """Resolve a cell-type string against the cell-type obs column's values.
+
+    If ``obs_col`` is None or absent, auto-discovers from the candidate chain
+    (``cell_type``, ``celltype``, ``annotation``, ``label``). This matches the
+    obs_column resolver's semantic map and unblocks subset_value resolution
+    on datasets where the cell-type column isn't literally named ``cell_type``.
+    """
+    resolved_col = _resolve_cell_type_col(adata, obs_col)
+    if resolved_col is None:
         return CellTypeLookupResult(
             matched=False, input_name=raw, resolved_name=None, strategy=None,
-            message=f"Column '{obs_col}' not found in adata.obs.",
+            message=(
+                f"No cell-type column found in adata.obs. Looked for: "
+                f"{', '.join(_CELL_TYPE_COL_CANDIDATES)}."
+            ),
         )
+    obs_col = resolved_col
 
     # Guard against degenerate queries: empty / whitespace-only raw can otherwise
     # exact-match a whitespace-only label stored in obs, which is semantically wrong.
@@ -84,6 +115,32 @@ def lookup_cell_type_name(
                 matched=False, input_name=raw, resolved_name=None,
                 strategy="initials_firstletter", candidates=fl_matches,
                 message=f"'{raw}' matches multiple cell types by first-letter initials.",
+            )
+
+    # Substring + simple plural-stem match for broad terms (e.g.
+    # "cardiomyocytes" → ["Early cardiomyocyte", "Ventricular cardiomyocyte"]).
+    # Min length 3 avoids junk matches from very short queries.
+    raw_lower = raw.strip().lower()
+    if len(raw_lower) >= 3:
+        raw_stem = raw_lower[:-1] if raw_lower.endswith("s") else raw_lower
+        substring_hits = sorted({
+            n for n in all_names
+            if raw_lower in n.lower() or (raw_stem != raw_lower and raw_stem in n.lower())
+        })
+        if len(substring_hits) == 1:
+            return CellTypeLookupResult(
+                matched=True, input_name=raw, resolved_name=substring_hits[0],
+                strategy="substring",
+                message=f"Cell type '{raw}' resolved to '{substring_hits[0]}' (substring match).",
+            )
+        if len(substring_hits) > 1:
+            return CellTypeLookupResult(
+                matched=False, input_name=raw, resolved_name=None,
+                strategy="broad_match_ambiguous", candidates=substring_hits,
+                message=(
+                    f"'{raw}' matches {len(substring_hits)} cell types: "
+                    f"{', '.join(substring_hits)}."
+                ),
             )
 
     return CellTypeLookupResult(

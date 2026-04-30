@@ -188,6 +188,33 @@ def _classify_one(name: str, series: pd.Series) -> SchemaEntry:
     return SchemaEntry(role=Role.OTHER, confidence="low", n_unique=n_unique)
 
 
+def get_column_role(adata: "AnnData", col_name: str) -> Optional[Role]:
+    """Read the classified role of an obs column from adata.uns["nvwa_meta"].
+
+    Returns None when the dataset hasn't been classified (no schema), or the
+    column is missing from the schema, or the stored role string is unknown.
+    Used by the resolver for cross-field-aware subset_value dispatch — see
+    src/domain/resolver/resolver._dispatch.
+    """
+    uns: Any = getattr(adata, "uns", {}) or {}
+    meta = uns.get("nvwa_meta", {}) if hasattr(uns, "get") else {}
+    if not isinstance(meta, dict):
+        return None
+    schema = meta.get("schema", {})
+    if not isinstance(schema, dict):
+        return None
+    entry = schema.get(col_name)
+    if not isinstance(entry, dict):
+        return None
+    role_str = entry.get("role")
+    if not isinstance(role_str, str):
+        return None
+    try:
+        return Role(role_str)
+    except ValueError:
+        return None
+
+
 def _values_preview(series: pd.Series) -> list[str]:
     """Return up to _MAX_VALUES_PREVIEW unique string values from the series."""
     unique = [str(v) for v in series.dropna().unique()]

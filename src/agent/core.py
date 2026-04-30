@@ -242,7 +242,17 @@ class AgentRunner:
             elif router_result.layer == "2b":
                 result = self._run_plain_llm(user_input, history)
             else:
-                result = self._run_langchain_loop(user_input, history, turn_id)
+                # Ambiguous: try the extractor first (it's a more sophisticated
+                # tool-selector than the router's keyword map). If the extractor
+                # returns "none" / unknown tool, spec pipeline returns None and
+                # we fall back to the LangChain loop. This closes router-keyword
+                # gaps where a real tool intent (e.g. multi-gene "show
+                # expression") doesn't match any keyword. Router's keyword map
+                # is now an accelerator/telemetry hint, not a gating mechanism;
+                # see TODO in src/agent/router.py.
+                result = self._run_spec_pipeline(user_input, history, turn_id)
+                if result is None:
+                    result = self._run_langchain_loop(user_input, history, turn_id)
 
             response_time = time.time() - start_time
             self._log_post_turn(

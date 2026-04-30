@@ -50,11 +50,13 @@ description: "Regression tests for nvwa-mvp scRNA visualization MVP"
 #   internal : default; must stay green (PR gate).
 #   dai      : customer prompts (Dai / mouse lung); tracks known-failing bugs.
 #   zhang    : customer prompts (Zhang / cardiac); tracks known-failing bugs.
+#   heart    : Yalu Layer 1 spec scenarios (mouse heart snRNA-seq); L1- cases.
 # Cases omit `source:` to default to internal. Paths resolved relative to repo root.
 source_defaults:
   internal: local/data/pbmc_test.h5ad
   dai: local/data/lung_combined_slim_v3.h5ad
   zhang: local/data/GSE223414_slim.h5ad
+  heart: local/data/heart_snRNAseq_slim_new.h5ad
 
 tests:
 
@@ -85,11 +87,11 @@ tests:
 
   - case_id: DA-03
     category: data_analysis
-    prompt: "Show a violin plot for CD3D across all clusters."
+    prompt: "Show a violin plot for MS4A1 across all clusters."
     expected_status: PASS
     must_contain:
       - "violin"
-      - "CD3D"
+      - "MS4A1"
     must_not_contain:
       - "preprocess"
     requires_plot: true
@@ -98,6 +100,16 @@ tests:
       User explicitly named a plot type — only 1 artifact expected.
       A feature plot alongside it is an error (unsolicited output).
       Per C1 rule: generate only the specified plot type when user names one.
+
+      Gene changed from CD3D to MS4A1 on 2026-04-29 (violin_plot spec-pipeline
+      migration). CD3D exists in pbmc_test's adata.raw but NOT in adata.var_names;
+      the legacy violin_plot @tool silently fell back to adata.raw, masking the
+      mismatch. The new gene_lookup primitive (src/domain/resolver/gene_lookup.py)
+      restricts to adata.var_names per the C5 architectural lock — raw fallback
+      is a hidden intent translation (G4) that gives the user data with different
+      normalization without their knowledge. MS4A1 is a B-cell marker present in
+      adata.var_names, preserving the test's intent (violin plot of A gene
+      across clusters works) without depending on the raw-fallback anti-pattern.
 
   - case_id: DA-04
     category: data_analysis
@@ -561,13 +573,22 @@ tests:
     prompt: "can you show me the gene expression for Fabp4 and Fabp5"
     expected_status: PASS
     must_contain:
+      - "dot plot"
       - "Fabp4"
       - "Fabp5"
+    expected_artifact_count: 1
     requires_plot: true
     notes: >
-      Two-gene expression, no plot type specified. Per C1 rule, feature +
-      violin for each gene is the target; artifact_count not asserted so the
-      test is tolerant of the agent batching differently.
+      Multi-gene expression visualization. Per Yalu §3C.1: "Multiple genes ·
+      All cell types · No condition split" → ONE dot_plot.
+
+      Updated 2026-04-29: previously the test accepted whatever artifact
+      count the legacy LangChain path produced (typically 4 — feature +
+      violin per gene = 2×2). New expectation: ONE dot_plot covering both
+      genes side-by-side, per Yalu spec. Test will FAIL until dot_plot
+      migrates to the spec pipeline (currently legacy `@tool`, falls back
+      to LangChain which still applies the legacy "feature + violin per
+      gene" rule from prompts.py:74). Fix lands when the dot_plot PR ships.
 
   - case_id: DAI-05
     source: dai
@@ -733,40 +754,56 @@ tests:
     source: dai
     category: data_analysis
     prompt: "show the volcano plot for EC"
-    expected_status: PASS
+    expected_status: WARN
     must_contain:
       - "volcano"
     requires_plot: true
     notes: >
-      Volcano plot for EC — requires a DE result first. Agent should run DE
-      (EC vs rest, or prompt for comparator) then plot.
+      DEFERRED 2026-04-29 (DE migration). Set to WARN until two
+      preconditions land: (1) find_markers (one-vs-rest DE for EC) ships
+      in src/domain/de.py via the §4 PR; (2) multi-turn test infrastructure
+      so turn 1 = find_markers, turn 2 = volcano follow-up. Original
+      expectation was one-vs-rest DE for EC (via legacy LangChain path)
+      then volcano. Failure here is expected and won't block the suite.
 
   - case_id: DAI-18
     source: dai
     category: data_analysis
-    prompt: "generate the different gene expression of EC between WT and CKO and show on the volcano plot."
+    prompt: "generate the different gene expression of EC between WT and CKO"
     expected_status: PASS
     must_contain:
       - "EC"
-      - "volcano"
-    requires_plot: true
+      - "WT"
+      - "CKO"
+    must_not_contain:
+      - "preprocess"
+    expected_artifact_count: 1
     notes: >
-      Subset to EC, pairwise DE between WT and CKO, volcano plot. Failed in
-      Dai's session: condition labels WT/CKO not resolved against the
-      condition obs column. Exact prompt that surfaced the bug.
+      Single-turn DE-only prompt (volcano follow-up split off as DAI-18b
+      when multi-turn infra lands). Tests run_de end-to-end: subset to EC
+      celltype + pairwise DE WT vs CKO. Original 2026-04 prompt asked for
+      DE+volcano in one turn; new spec-pipeline architecture is single-tool
+      per turn, so the volcano half moves to a follow-up. The agent's
+      response should end with a volcano offer per Path D
+      (src/domain/de.py:_VOLCANO_OFFER) — that part is qualitative, not in
+      must_contain.
 
   - case_id: DAI-19
     source: dai
     category: data_analysis
-    prompt: "generate the different gene expression of EC between WT and CKO condition and show on the volcano plot."
+    prompt: "generate the different gene expression of EC between WT and CKO condition"
     expected_status: PASS
     must_contain:
       - "EC"
-      - "volcano"
-    requires_plot: true
+      - "WT"
+      - "CKO"
+    must_not_contain:
+      - "preprocess"
+    expected_artifact_count: 1
     notes: >
-      Paraphrase of DAI-18 with "condition" added as a disambiguator. Same
-      bug class — useful to see whether the extra word flips the result.
+      Paraphrase of DAI-18 with "condition" added as a disambiguator —
+      checks that the extra word still routes to run_de with subset to EC
+      and groupby=condition. Volcano follow-up split off (see DAI-18 note).
 
   # ── customer: zhang (cardiac dev — DDX21/YAP1/MKI67, SHF, D10 conditions) ────
   # Prompts captured verbatim from Zhang's 2026-04-20 session.
@@ -1052,3 +1089,569 @@ tests:
       drops of either dimension in the response indicate silent substitution
       (e.g. the agent splits by condition instead of subsetting, or colors
       by something other than group).
+
+  # ════════════════════════════════════════════════════════════════════════
+  # Yalu Layer 1 spec scenarios — baseline regression suite
+  # ════════════════════════════════════════════════════════════════════════
+  # Each L1- case maps 1:1 to a Yalu Layer 1 scenario via scenario_id.
+  # Source: heart_snRNAseq_slim_new (20K cells, 26 cell types, Control/Mutant binary).
+  # Genes: Tnnt2 (cardiomyocyte), Pecam1 (endothelial), Postn (fibroblast).
+  # Cell types: CM.1, Fib.1, EC.1.
+  # Conditions: Control, Mutant.
+  #
+  # Run via: python scripts/run_tests.py --source heart
+  # ════════════════════════════════════════════════════════════════════════
+
+  # ── §1 UMAP ────────────────────────────────────────────────────────────
+  - case_id: "L1-1.1"
+    source: heart
+    category: data_analysis
+    scenario_id: "1.1"
+    prompt: "Show the UMAP colored by cell type."
+    expected_status: PASS
+    must_contain:
+      - "umap"
+    requires_plot: true
+    expected_artifact_count: 1
+    requires_precomputed_umap: true
+    notes: Yalu §1.1 — UMAP colored by cell type, no condition split.
+
+  - case_id: "L1-1.2"
+    source: heart
+    category: data_analysis
+    scenario_id: "1.2"
+    prompt: "Show the UMAP colored by cell type, split by condition."
+    expected_status: PASS
+    must_contain:
+      - "umap"
+    requires_plot: true
+    expected_artifact_count: 1
+    requires_precomputed_umap: true
+    notes: Yalu §1.2 — UMAP split by condition.
+
+  - case_id: "L1-1.3"
+    source: heart
+    category: data_analysis
+    scenario_id: "1.3"
+    prompt: "Show the UMAP for CM.1 and Fib.1 only."
+    expected_status: PASS
+    must_contain:
+      - "umap"
+      - "CM.1"
+      - "Fib.1"
+    requires_plot: true
+    expected_artifact_count: 1
+    requires_precomputed_umap: true
+    notes: Yalu §1.3 — UMAP subset to specific cell types.
+
+  - case_id: "L1-1.4"
+    source: heart
+    category: data_analysis
+    scenario_id: "1.4"
+    prompt: "Show the UMAP for CM.1 and Fib.1 only, split by condition."
+    expected_status: PASS
+    must_contain:
+      - "umap"
+      - "CM.1"
+      - "Fib.1"
+    requires_plot: true
+    expected_artifact_count: 1
+    requires_precomputed_umap: true
+    notes: Yalu §1.4 — UMAP subset + split by condition.
+
+  # ── §2A QC violin ──────────────────────────────────────────────────────
+  - case_id: "L1-2A.1"
+    source: heart
+    category: data_analysis
+    scenario_id: "2A.1"
+    prompt: "Show the QC metrics for all cells."
+    expected_status: PASS
+    must_contain:
+      - "qc"
+    requires_plot: true
+    expected_artifact_count: 1
+    notes: Yalu §2A.1 — qc_violin_plot, single multi-panel figure.
+
+  - case_id: "L1-2A.2"
+    source: heart
+    category: data_analysis
+    scenario_id: "2A.2"
+    prompt: "Show the QC metrics for all cells, split by condition."
+    expected_status: PASS
+    must_contain:
+      - "qc"
+    requires_plot: true
+    expected_artifact_count: 1
+    notes: Yalu §2A.2 — qc_violin_plot with split_by; metric × condition grid.
+
+  # ── §2B QC summary ─────────────────────────────────────────────────────
+  - case_id: "L1-2B.1"
+    source: heart
+    category: data_analysis
+    scenario_id: "2B.1"
+    prompt: "Give me a QC summary of my dataset."
+    expected_status: PASS
+    must_contain:
+      - "qc"
+    requires_table: true
+    expected_artifact_count: 1
+    notes: Yalu §2B.1 — qc_summary_table with automated flagging.
+
+  # ── §3A Feature plot ───────────────────────────────────────────────────
+  - case_id: "L1-3A.1"
+    source: heart
+    category: data_analysis
+    scenario_id: "3A.1"
+    prompt: "Show the expression of Tnnt2 on the UMAP."
+    expected_status: PASS
+    must_contain:
+      - "Tnnt2"
+    requires_plot: true
+    expected_artifact_count: 1
+    requires_precomputed_umap: true
+    notes: Yalu §3A.1 — single-gene UMAP overlay.
+
+  - case_id: "L1-3A.2"
+    source: heart
+    category: data_analysis
+    scenario_id: "3A.2"
+    prompt: "Show the expression of Tnnt2 on the UMAP, split by condition."
+    expected_status: PASS
+    must_contain:
+      - "Tnnt2"
+    requires_plot: true
+    expected_artifact_count: 1
+    requires_precomputed_umap: true
+    notes: Yalu §3A.2 — single-gene + split by condition.
+
+  - case_id: "L1-3A.3"
+    source: heart
+    category: data_analysis
+    scenario_id: "3A.3"
+    prompt: "Show the expression of Tnnt2 in CM.1 only."
+    expected_status: PASS
+    must_contain:
+      - "Tnnt2"
+      - "CM.1"
+    requires_plot: true
+    expected_artifact_count: 1
+    requires_precomputed_umap: true
+    notes: Yalu §3A.3 — single-gene + cell-type subset.
+
+  - case_id: "L1-3A.4"
+    source: heart
+    category: data_analysis
+    scenario_id: "3A.4"
+    prompt: "Show the expression of Tnnt2 in CM.1 only, split by condition."
+    expected_status: WARN
+    must_contain:
+      - "Tnnt2"
+      - "CM.1"
+    requires_plot: true
+    requires_precomputed_umap: true
+    notes: >
+      Yalu §3A.4 — single-gene + subset + split. **Yalu spec gap (WARN):**
+      §3A.3 / §3A.4 prompts drop "on the UMAP" keyword present in §3A.1 /
+      §3A.2, making them linguistically indistinguishable from §3B.4 /
+      §3B.5 (both share "in [Cell Type] only [, split by condition]"
+      shape). LLM extractor cannot reliably disambiguate without the
+      keyword. See local/from_yalu/scenario_gaps_2.md for proposed Yalu
+      Layer 1 wording fix. Re-enable to PASS when Yalu spec adds "on the
+      UMAP" to §3A.3 / §3A.4.
+
+  # ── §3B Violin plot ────────────────────────────────────────────────────
+  - case_id: "L1-3B.1"
+    source: heart
+    category: data_analysis
+    scenario_id: "3B.1"
+    prompt: "Show the expression of Tnnt2 across all cell types."
+    expected_status: PASS
+    must_contain:
+      - "Tnnt2"
+    requires_plot: true
+    expected_artifact_count: 1
+    notes: Yalu §3B.1 — violin, single gene, x-axis = cell type.
+
+  - case_id: "L1-3B.2"
+    source: heart
+    category: data_analysis
+    scenario_id: "3B.2"
+    prompt: "Show the expression of Tnnt2 across all cell types, split by condition."
+    expected_status: PASS
+    must_contain:
+      - "Tnnt2"
+    requires_plot: true
+    expected_artifact_count: 1
+    notes: Yalu §3B.2 — violin split by condition.
+
+  - case_id: "L1-3B.3"
+    source: heart
+    category: data_analysis
+    scenario_id: "3B.3"
+    prompt: "Show the expression of Tnnt2 across all conditions."
+    expected_status: PASS
+    must_contain:
+      - "Tnnt2"
+    requires_plot: true
+    expected_artifact_count: 1
+    notes: Yalu §3B.3 — violin, x-axis = condition.
+
+  - case_id: "L1-3B.4"
+    source: heart
+    category: data_analysis
+    scenario_id: "3B.4"
+    prompt: "Show the expression of Tnnt2 in CM.1 only, grouped by condition."
+    expected_status: PASS
+    must_contain:
+      - "Tnnt2"
+      - "CM.1"
+    requires_plot: true
+    expected_artifact_count: 1
+    notes: Yalu §3B.4 — violin, subset to one cell type, x-axis = condition.
+
+  - case_id: "L1-3B.5"
+    source: heart
+    category: data_analysis
+    scenario_id: "3B.5"
+    prompt: "Show the expression of Tnnt2 in CM.1, Fib.1, and EC.1, split by condition."
+    expected_status: PASS
+    must_contain:
+      - "Tnnt2"
+      - "CM.1"
+      - "Fib.1"
+      - "EC.1"
+    requires_plot: true
+    expected_artifact_count: 1
+    notes: Yalu §3B.5 — violin, subset multi-celltype + split.
+
+  - case_id: "L1-3B.6"
+    source: heart
+    category: data_analysis
+    scenario_id: "3B.6"
+    prompt: "Show the expression of Tnnt2 across all cell types in Control only."
+    expected_status: PASS
+    must_contain:
+      - "Tnnt2"
+      - "Control"
+    requires_plot: true
+    expected_artifact_count: 1
+    notes: Yalu §3B.6 — violin, subset to one condition, x-axis = cell type.
+
+  # ── §3C Dot plot ───────────────────────────────────────────────────────
+  - case_id: "L1-3C.1"
+    source: heart
+    category: data_analysis
+    scenario_id: "3C.1"
+    prompt: "Show a dot plot of Tnnt2, Pecam1, Postn across all cell types."
+    expected_status: PASS
+    must_contain:
+      - "dot plot"
+      - "Tnnt2"
+    requires_plot: true
+    expected_artifact_count: 1
+    notes: Yalu §3C.1 — multi-gene dot plot.
+
+  - case_id: "L1-3C.2"
+    source: heart
+    category: data_analysis
+    scenario_id: "3C.2"
+    prompt: "Show a dot plot of Tnnt2, Pecam1, Postn across all cell types, split by condition."
+    expected_status: PASS
+    must_contain:
+      - "dot plot"
+      - "Tnnt2"
+    requires_plot: true
+    expected_artifact_count: 1
+    notes: Yalu §3C.2 — dot plot split by condition.
+
+  - case_id: "L1-3C.3"
+    source: heart
+    category: data_analysis
+    scenario_id: "3C.3"
+    prompt: "Show a dot plot of Tnnt2, Pecam1, Postn in CM.1 and Fib.1 only."
+    expected_status: PASS
+    must_contain:
+      - "dot plot"
+      - "CM.1"
+      - "Fib.1"
+    requires_plot: true
+    expected_artifact_count: 1
+    notes: Yalu §3C.3 — dot plot subset cell types.
+
+  - case_id: "L1-3C.4"
+    source: heart
+    category: data_analysis
+    scenario_id: "3C.4"
+    prompt: "Show a dot plot of Tnnt2, Pecam1, Postn in CM.1 and Fib.1 only, split by condition."
+    expected_status: PASS
+    must_contain:
+      - "dot plot"
+      - "CM.1"
+      - "Fib.1"
+    requires_plot: true
+    expected_artifact_count: 1
+    notes: Yalu §3C.4 — dot plot subset + split.
+
+  # ── §3D Heatmap ────────────────────────────────────────────────────────
+  - case_id: "L1-3D.1"
+    source: heart
+    category: data_analysis
+    scenario_id: "3D.1"
+    prompt: "Show a heatmap of Tnnt2, Pecam1, Postn across all cell types."
+    expected_status: PASS
+    must_contain:
+      - "heatmap"
+      - "Tnnt2"
+    requires_plot: true
+    expected_artifact_count: 1
+    notes: Yalu §3D.1 — multi-gene heatmap.
+
+  - case_id: "L1-3D.2"
+    source: heart
+    category: data_analysis
+    scenario_id: "3D.2"
+    prompt: "Show a heatmap of Tnnt2, Pecam1, Postn across all cell types, split by condition."
+    expected_status: PASS
+    must_contain:
+      - "heatmap"
+      - "Tnnt2"
+    requires_plot: true
+    expected_artifact_count: 1
+    notes: Yalu §3D.2 — heatmap split by condition.
+
+  - case_id: "L1-3D.3"
+    source: heart
+    category: data_analysis
+    scenario_id: "3D.3"
+    prompt: "Show a heatmap of Tnnt2, Pecam1, Postn in CM.1 and Fib.1 only."
+    expected_status: PASS
+    must_contain:
+      - "heatmap"
+      - "CM.1"
+      - "Fib.1"
+    requires_plot: true
+    expected_artifact_count: 1
+    notes: Yalu §3D.3 — heatmap subset.
+
+  - case_id: "L1-3D.4"
+    source: heart
+    category: data_analysis
+    scenario_id: "3D.4"
+    prompt: "Show a heatmap of Tnnt2, Pecam1, Postn in CM.1 and Fib.1 only, split by condition."
+    expected_status: PASS
+    must_contain:
+      - "heatmap"
+      - "CM.1"
+      - "Fib.1"
+    requires_plot: true
+    expected_artifact_count: 1
+    notes: Yalu §3D.4 — heatmap subset + split.
+
+  - case_id: "L1-3D.5"
+    source: heart
+    category: data_analysis
+    scenario_id: "3D.5"
+    prompt: "Show a heatmap of Tnnt2, Pecam1, Postn grouped by condition."
+    expected_status: WARN
+    must_contain:
+      - "heatmap"
+      - "Tnnt2"
+    requires_plot: true
+    notes: >
+      Yalu §3D.5 — spec-gap WARN. Yalu requests "individual cell level"
+      rendering but sc.pl.heatmap aggregates by groupby by default. Per
+      scenario_gaps.md, either Yalu spec needs cell-level rendering mode
+      explicit, or §3D.5 collapses to §3D.1 with different groupby. Until
+      resolved, the response is a regular aggregated heatmap with condition
+      as the group axis.
+
+  # ── §4 Find markers ────────────────────────────────────────────────────
+  - case_id: "L1-4.1"
+    source: heart
+    category: data_analysis
+    scenario_id: "4.1"
+    prompt: "Find marker genes for all cell types."
+    expected_status: PASS
+    must_contain:
+      - "marker"
+    requires_table: true
+    expected_artifact_count: 1
+    notes: Yalu §4.1 — find_all_markers; multi-group survey.
+
+  - case_id: "L1-4.2"
+    source: heart
+    category: data_analysis
+    scenario_id: "4.2"
+    prompt: "Find marker genes for CM.1."
+    expected_status: PASS
+    must_contain:
+      - "marker"
+      - "CM.1"
+    requires_table: true
+    expected_artifact_count: 1
+    notes: Yalu §4.2 — find_markers; single-celltype one-vs-rest.
+
+  # ── §4.3 dot_plot_top_markers (DEFERRED to T-055 — workflow infra) ─────
+  # Uncomment when T-055 multi-turn workflow + state-aware extractor land.
+  # - case_id: "L1-4.3"
+  #   source: heart
+  #   category: data_analysis
+  #   scenario_id: "4.3"
+  #   prompt: "Show a dot plot of the top 5 marker genes for each cell type."
+  #   expected_status: PASS
+  #   must_contain:
+  #     - "dot plot"
+  #     - "marker"
+  #   requires_plot: true
+  #   expected_artifact_count: 1
+  #   notes: >
+  #     Yalu §4.3 — workflow: find_all_markers (if not run) → dot_plot_top_markers.
+  #     Deferred to T-055. Yalu evidence (5 scenarios across §3C/§3D/§4.3
+  #     reference "top marker genes" alternative) supports the design.
+
+  # ── §5 DE analysis ─────────────────────────────────────────────────────
+  - case_id: "L1-5.1"
+    source: heart
+    category: data_analysis
+    scenario_id: "5.1"
+    prompt: "Find differentially expressed genes between CM.1 and Fib.1."
+    expected_status: PASS
+    must_contain:
+      - "CM.1"
+      - "Fib.1"
+    requires_table: true
+    expected_artifact_count: 1
+    notes: Yalu §5.1 — run_de pairwise cell type vs cell type.
+
+  - case_id: "L1-5.2"
+    source: heart
+    category: data_analysis
+    scenario_id: "5.2"
+    prompt: "Find differentially expressed genes between Control and Mutant."
+    expected_status: PASS
+    must_contain:
+      - "Control"
+      - "Mutant"
+    requires_table: true
+    expected_artifact_count: 1
+    notes: Yalu §5.2 — run_de pairwise condition vs condition.
+
+  - case_id: "L1-5.3"
+    source: heart
+    category: data_analysis
+    scenario_id: "5.3"
+    prompt: "Find differentially expressed genes between Control and Mutant in CM.1 only."
+    expected_status: PASS
+    must_contain:
+      - "Control"
+      - "Mutant"
+      - "CM.1"
+    requires_table: true
+    expected_artifact_count: 1
+    notes: Yalu §5.3 — run_de pairwise condition vs condition + cell-type subset.
+
+  # ── §5.4 (DEFERRED — needs create_group_column substrate + 2b clarification UX) ──
+  # Uncomment when create_group_column ships and 2b clarification flow handles
+  # the "I'm pooling [Group A] = [Cond A, Cond B] vs [Group B] = [...] — confirm?" turn.
+  # - case_id: "L1-5.4"
+  #   source: heart
+  #   category: data_analysis
+  #   scenario_id: "5.4"
+  #   prompt: >
+  #     Find differentially expressed genes between Group 1 and Group 2,
+  #     where Group 1 includes Control_A and Control_B and Group 2 includes
+  #     Mutant_A and Mutant_B.
+  #   expected_status: PASS
+  #   must_contain:
+  #     - "Group 1"
+  #     - "Group 2"
+  #   requires_table: true
+  #   expected_artifact_count: 1
+  #   notes: >
+  #     Yalu §5.4 — complex pooled DE. Needs (a) group_map dict[str, list[str]]
+  #     extractor contract, (b) create_group_column server-side primitive,
+  #     (c) 2b clarification turn. Heart's binary Control/Mutant doesn't
+  #     naturally fit §5.4 — when the substrate ships, switch to a dataset
+  #     with multiple sub-conditions per group.
+
+  # ── §6 Composition ─────────────────────────────────────────────────────
+  - case_id: "L1-6A.1"
+    source: heart
+    category: data_analysis
+    scenario_id: "6A.1"
+    prompt: "Show the cell number for each cell type across conditions."
+    expected_status: PASS
+    must_contain:
+      - "composition"
+    requires_plot: true
+    expected_artifact_count: 1
+    notes: Yalu §6A.1 — composition_barplot mode='count'.
+
+  - case_id: "L1-6A.2"
+    source: heart
+    category: data_analysis
+    scenario_id: "6A.2"
+    prompt: "Show the proportion of each cell type across conditions."
+    expected_status: PASS
+    must_contain:
+      - "composition"
+    requires_plot: true
+    expected_artifact_count: 1
+    notes: Yalu §6A.2 — composition_barplot mode='proportion_by_celltype'.
+
+  - case_id: "L1-6A.3"
+    source: heart
+    category: data_analysis
+    scenario_id: "6A.3"
+    prompt: "Show the cell type composition for each condition."
+    expected_status: PASS
+    must_contain:
+      - "composition"
+    requires_plot: true
+    expected_artifact_count: 1
+    notes: Yalu §6A.3 — composition_barplot mode='proportion_by_condition'.
+
+  - case_id: "L1-6B.1"
+    source: heart
+    category: data_analysis
+    scenario_id: "6B.1"
+    prompt: "Show the cell number for CM.1, Fib.1, and EC.1 across conditions."
+    expected_status: PASS
+    must_contain:
+      - "composition"
+      - "CM.1"
+      - "Fib.1"
+      - "EC.1"
+    requires_plot: true
+    expected_artifact_count: 1
+    notes: Yalu §6B.1 — composition mode='count' + celltypes subset.
+
+  - case_id: "L1-6B.2"
+    source: heart
+    category: data_analysis
+    scenario_id: "6B.2"
+    prompt: "Show the proportion of CM.1, Fib.1, and EC.1 across conditions."
+    expected_status: PASS
+    must_contain:
+      - "composition"
+      - "CM.1"
+      - "Fib.1"
+      - "EC.1"
+    requires_plot: true
+    expected_artifact_count: 1
+    notes: Yalu §6B.2 — composition mode='proportion_by_celltype' + subset.
+
+  - case_id: "L1-6B.3"
+    source: heart
+    category: data_analysis
+    scenario_id: "6B.3"
+    prompt: "Show the cell type composition of CM.1, Fib.1, and EC.1 for each condition."
+    expected_status: PASS
+    must_contain:
+      - "composition"
+      - "CM.1"
+      - "Fib.1"
+      - "EC.1"
+    requires_plot: true
+    expected_artifact_count: 1
+    notes: Yalu §6B.3 — composition mode='proportion_by_condition' + subset.

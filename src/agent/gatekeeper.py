@@ -306,6 +306,15 @@ def _check_entity_missing(
     for p in entry.params:
         if p.field_type is None:
             continue
+        # obs_column values are technical column-name identifiers (e.g.
+        # "celltype", "orig.ident"), not user-facing entities the responder
+        # or tool_output would echo verbatim. Skip — checking them is at
+        # best a tautology (when tool interpolates the column name into its
+        # output) and at worst a false-fail (when tool text uses user-
+        # facing terms like "cell types"). User-facing values (genes,
+        # cell_type, condition) remain checked. See T-064.
+        if p.field_type == "obs_column":
+            continue
         value = spec.params.get(p.name)
         if value is None:
             continue

@@ -21,9 +21,20 @@ class ConditionLookupResult:
     message: str = ""
 
 
-def lookup_condition_name(adata: "AnnData", raw: str) -> ConditionLookupResult:
-    """Scan all declared condition columns for the value."""
-    condition_cols = _get_condition_cols(adata)
+def lookup_condition_name(
+    adata: "AnnData", raw: str, obs_col: str | None = None,
+) -> ConditionLookupResult:
+    """Resolve a condition value against adata.obs.
+
+    If ``obs_col`` is provided AND present in adata.obs, search only that
+    column (used by the resolver's subset_value cross-field dispatch when
+    subset_key has been resolved to a CONDITION-role column). Otherwise
+    scan all declared condition columns from adata.uns["nvwa_meta"].
+    """
+    if obs_col is not None and obs_col in adata.obs.columns:
+        condition_cols = [obs_col]
+    else:
+        condition_cols = _get_condition_cols(adata)
 
     exact_matches: list[tuple[str, str]] = []
     for col in condition_cols:
