@@ -41,23 +41,22 @@ fi
 
 echo "🐳 Starting services with Docker Compose..."
 echo ""
-docker-compose up --build -d
+docker compose up --build -d
 
 echo ""
 echo "✅ Services started successfully!"
 echo ""
 echo "📊 Access points:"
-echo "   Landing:   http://localhost"
 echo "   Main App:  http://localhost:8501"
 echo "   Dashboard: http://localhost:8502"
 echo ""
 echo "🔑 Test tokens available in: pilot_tokens.json"
 echo ""
 echo "📝 View logs:"
-echo "   docker-compose logs -f"
+echo "   docker compose logs -f"
 echo ""
 echo "🛑 Stop services:"
-echo "   docker-compose down"
+echo "   docker compose down"
 echo ""
 echo "📖 Testing guide: docs/TESTING_GUIDE.md"
 echo ""

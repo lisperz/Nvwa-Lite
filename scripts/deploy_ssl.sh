@@ -13,28 +13,25 @@ echo "Step 2: Installing SSL certificate..."
 ssh -i "$SSH_KEY" "$EC2_HOST" "bash /tmp/setup_ssl.sh"
 
 echo "Step 3: Updating nginx configuration..."
-scp -i "$SSH_KEY" nginx/landing_ssl.conf "$EC2_HOST:/tmp/"
+scp -i "$SSH_KEY" infra/nginx/nvwa.bio.conf "$EC2_HOST:/tmp/"
 
 ssh -i "$SSH_KEY" "$EC2_HOST" << 'EOF'
-# Stop Docker nginx
+# Stop Docker landing service (if running)
 cd /home/ubuntu/Nvwa-Lite
-docker-compose stop landing
+docker compose stop landing 2>/dev/null || true
 
 # Install nginx on host
 sudo apt-get update
 sudo apt-get install -y nginx
 
 # Copy SSL config
-sudo cp /tmp/landing_ssl.conf /etc/nginx/sites-available/nvwa.bio
+sudo cp /tmp/nvwa.bio.conf /etc/nginx/sites-available/nvwa.bio
 sudo ln -sf /etc/nginx/sites-available/nvwa.bio /etc/nginx/sites-enabled/
 sudo rm -f /etc/nginx/sites-enabled/default
 
 # Copy landing page files
 sudo mkdir -p /var/www/nvwa.bio
 sudo cp -r /home/ubuntu/Nvwa-Lite/landing/* /var/www/nvwa.bio/
-
-# Update nginx config to use correct path
-sudo sed -i 's|/usr/share/nginx/html|/var/www/nvwa.bio|g' /etc/nginx/sites-available/nvwa.bio
 
 # Test and reload nginx
 sudo nginx -t

@@ -96,7 +96,7 @@ tail -f logs/user_interaction.log
 ## Step 5: Stop Services
 
 ```bash
-docker-compose down
+docker compose down
 ```
 
 ## If Everything Works
@@ -109,24 +109,24 @@ docker-compose down
 
 ### Check Docker logs
 ```bash
-docker-compose logs -f
+docker compose logs -f
 ```
 
 ### Check specific service
 ```bash
-docker-compose logs nvwa-lite
-docker-compose logs dashboard
-docker-compose logs redis
+docker compose logs nvwa-lite
+docker compose logs dashboard
+docker compose logs redis
 ```
 
 ### Restart services
 ```bash
-docker-compose restart
+docker compose restart
 ```
 
 ### Full reset
 ```bash
-docker-compose down -v  # Remove volumes
+docker compose down -v  # Remove volumes
 rm -rf logs/*           # Clear logs
 ./scripts/start_local_test.sh
 ```
@@ -134,12 +134,12 @@ rm -rf logs/*           # Clear logs
 ## Common Issues
 
 **"Redis connection failed"**
-- Check: `docker-compose ps` - Redis should be running
+- Check: `docker compose ps` - Redis should be running
 - System will use in-memory fallback (still works)
 
 **"OpenAI API key not configured"**
 - Check .env file has: `OPENAI_API_KEY=sk-...`
-- Restart: `docker-compose restart`
+- Restart: `docker compose restart`
 
 **"Port already in use"**
 - Stop other services using 8501/8502

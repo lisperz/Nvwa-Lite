@@ -28,5 +28,5 @@ if [ "$CPU_USAGE" -gt "$CPU_THRESHOLD" ]; then
 fi
 
 # Show active sessions
-ACTIVE_SESSIONS=$(docker-compose exec -T redis redis-cli GET active_sessions_count 2>/dev/null || echo "0")
+ACTIVE_SESSIONS=$(docker compose exec -T redis redis-cli GET active_sessions_count 2>/dev/null || echo "0")
 echo "Active sessions: ${ACTIVE_SESSIONS:-0}/20"

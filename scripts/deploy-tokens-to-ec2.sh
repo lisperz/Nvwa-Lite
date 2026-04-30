@@ -58,7 +58,7 @@ fi
 # Restart the nvwa-lite container
 echo ""
 echo "Step 2: Restarting nvwa-lite container..."
-ssh -i "$SSH_KEY" "${EC2_USER}@${EC2_IP}" "cd ${EC2_PATH} && docker-compose restart nvwa-lite"
+ssh -i "$SSH_KEY" "${EC2_USER}@${EC2_IP}" "cd ${EC2_PATH} && docker compose restart nvwa-lite"
 
 if [ $? -eq 0 ]; then
     echo "✓ Container restarted successfully"

@@ -29,8 +29,8 @@ else
 fi
 
 # Restart services to apply changes
-docker-compose down
-docker-compose up -d
+docker compose down
+docker compose up -d
 
 echo "Services restarted with new configuration"
 EOF

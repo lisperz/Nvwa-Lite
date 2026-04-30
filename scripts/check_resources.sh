@@ -28,10 +28,10 @@ echo ""
 
 echo "=== Active Sessions (Redis) ==="
 echo ""
-ACTIVE_COUNT=$(docker-compose exec -T redis redis-cli GET active_sessions_count 2>/dev/null || echo "0")
+ACTIVE_COUNT=$(docker compose exec -T redis redis-cli GET active_sessions_count 2>/dev/null || echo "0")
 echo "Active sessions: ${ACTIVE_COUNT:-0}"
 echo ""
 
 echo "=== Container Health ==="
 echo ""
-docker-compose ps
+docker compose ps

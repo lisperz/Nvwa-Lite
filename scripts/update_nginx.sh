@@ -9,7 +9,7 @@ SSH_KEY="${1:-/Users/zhuchen/Downloads/nvwa-key.pem}"
 EC2_HOST="ubuntu@3.150.203.87"
 
 echo "=== Uploading nginx config to EC2 ==="
-scp -i "$SSH_KEY" nginx/landing_ssl.conf "$EC2_HOST:/tmp/nvwa_nginx.conf"
+scp -i "$SSH_KEY" infra/nginx/nvwa.bio.conf "$EC2_HOST:/tmp/nvwa_nginx.conf"
 
 echo "=== Installing and reloading nginx on EC2 ==="
 ssh -i "$SSH_KEY" "$EC2_HOST" << 'EOF'

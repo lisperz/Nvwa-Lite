@@ -1,13 +1,4 @@
 services:
-  landing:
-    image: nginx:alpine
-    ports:
-      - "80:80"
-    volumes:
-      - ../landing:/usr/share/nginx/html:ro
-      - ./nginx/landing.conf:/etc/nginx/conf.d/default.conf:ro
-    restart: unless-stopped
-
   redis:
     image: redis:7-alpine
     ports:
@@ -26,7 +17,9 @@ services:
     build: .
     ports:
       - "8501:8501"
-      - "8503:8503"
+      # 8503 bound to localhost only — cleanup endpoint must not be publicly reachable.
+      # Host nginx proxies /api/cleanup → localhost:8503 from the EC2 host network.
+      - "127.0.0.1:8503:8503"
     env_file:
       - .env
     environment:
@@ -44,6 +37,12 @@ services:
       redis:
         condition: service_healthy
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8501/app/_stcore/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
   dashboard:
     build: .
@@ -62,6 +61,12 @@ services:
       redis:
         condition: service_healthy
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8502/admin/_stcore/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
 volumes:
   redis-data:

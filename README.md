@@ -9,7 +9,7 @@ A conversational agent for single-cell RNA-seq data visualization. Upload `.h5ad
 git clone https://github.com/lisperz/Nvwa-Lite.git
 cd Nvwa-Lite
 cp .env.example .env  # Add your OPENAI_API_KEY
-docker-compose up
+docker compose up
 ```
 
 Open http://localhost:8501

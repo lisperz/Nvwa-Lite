@@ -1,7 +1,7 @@
 """Admin monitoring dashboard — powered by RDS PostgreSQL.
 
 Tabs: Overview · Users · Tools · Sessions
-Run via docker-compose (port 8502) or: uv run streamlit run src/platform/observability/dashboard.py
+Run via docker compose (port 8502) or: uv run streamlit run src/platform/observability/dashboard.py
 """
 
 from __future__ import annotations

@@ -36,9 +36,9 @@ fi
 
 # Rebuild Docker container
 echo "🔨 Rebuilding Docker container..."
-docker-compose down
-docker-compose build --no-cache
-docker-compose up -d
+docker compose down
+docker compose build --no-cache
+docker compose up -d
 
 # Wait for container to start
 echo "⏳ Waiting for container to start..."
@@ -46,14 +46,14 @@ sleep 5
 
 # Check container status
 echo "📊 Container status:"
-docker-compose ps
+docker compose ps
 
 # Show logs
 echo "📝 Recent logs:"
-docker-compose logs --tail=50
+docker compose logs --tail=50
 
 echo ""
 echo "✅ Deployment complete!"
 echo "🌐 Access your app at: http://3.150.203.87"
 echo ""
-echo "To view live logs, run: docker-compose logs -f"
+echo "To view live logs, run: docker compose logs -f"

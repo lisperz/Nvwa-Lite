@@ -21,7 +21,6 @@ How the prod stack is wired today (snapshot: 2026-04-26). Two layers: an in-Dock
   │   │   nvwa-lite  (Streamlit + cleanup)│ │
   │   │   dashboard  (Streamlit admin)    │ │
   │   │   redis      (session store)      │ │
-  │   │   landing    (broken, ignore)     │ │
   │   └───────────────────────────────────┘ │
   └─────────────────────────────────────────┘
        │
@@ -39,7 +38,7 @@ nginx is a reverse proxy on the EC2 host. It does four things Streamlit can't do
 3. **WebSocket proxying** — Streamlit needs a persistent WebSocket back to the browser; nginx is configured with `Upgrade` headers to proxy it.
 4. **Upload size + timeouts** — `client_max_body_size 2000m` (2 GB, matches .h5ad uploads), 1-hour read/send timeouts so long jobs aren't cut off.
 
-The host nginx config currently lives at `/etc/nginx/sites-enabled/nvwa.bio` on the EC2 box (not yet in this repo).
+The host nginx config currently lives at `/etc/nginx/sites-enabled/nvwa.bio` on the EC2 box. The source config is version-controlled in this repo at `infra/nginx/nvwa.bio.conf`.
 
 ## Streamlit plumbing — the dance
 
@@ -82,13 +81,26 @@ Redis solves this. Per-user/session state lives in keys like `session:<session_i
 
 Step 5-6 (server-side double write to disk + S3) is currently a known bottleneck that has caused EC2 disk-fill incidents.
 
+## Port 8503 — Cleanup Endpoint
+
+The cleanup server runs inside the `nvwa-lite` container as a background HTTP server thread (started from `src/ui/app.py:109`). It listens on port 8503 internally.
+
+In `docker-compose.yml`, port 8503 is bound to `127.0.0.1:8503:8503` (localhost-only). This means:
+- The cleanup endpoint is NOT publicly reachable from the internet
+- Only processes on the EC2 host can reach `localhost:8503`
+- Host nginx proxies `https://nvwa.bio/api/cleanup` → `http://localhost:8503/cleanup`
+
+Browser `sendBeacon` calls hit `https://nvwa.bio/api/cleanup`, which nginx proxies to the cleanup server inside the Docker network.
+
+**Security note:** Port 8503 must remain bound to `127.0.0.1` only. Binding to `0.0.0.0:8503` would expose the raw cleanup endpoint publicly, bypassing nginx.
+
 ## Pieces NOT in the repo
 
 The following live on the EC2 host or in external services, not version control:
 
-- Host nginx config (`/etc/nginx/sites-enabled/nvwa.bio`)
+- Host nginx config — source is in `infra/nginx/nvwa.bio.conf`; deployed to `/etc/nginx/sites-enabled/nvwa.bio` on EC2
 - SSL certs (Let's Encrypt at `/etc/letsencrypt/live/nvwa.bio/`)
 - Static landing page (`/var/www/nvwa.bio/index.html`)
 - Populated `.env` with secrets (`OPENAI_API_KEY`, `DATABASE_URL`, `S3_BUCKET_NAME`, `ADMIN_PASSWORD`)
 - AWS-side state — S3 bucket policy, lifecycle rules, RDS config, security groups
-- Deploy procedure (manual `git pull + docker-compose restart`)
+- Deploy procedure (manual `git pull + docker compose restart`)

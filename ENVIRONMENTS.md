@@ -78,7 +78,7 @@ Monitor & Iterate
 ./scripts/start_local_test.sh
 # Test at http://localhost:8501
 # Verify S3: aws s3 ls s3://nvwa-test-data/users/ --recursive
-docker-compose down
+docker compose down
 ```
 
 ### Deploy to Production
@@ -86,17 +86,17 @@ docker-compose down
 ssh prod-ec2
 cd nvwa-lite && git pull
 # Update .env with production values
-docker-compose down && docker-compose up -d
+docker compose down && docker compose up -d
 ```
 
 ### Rollback Production
 ```bash
 ssh prod-ec2
 cd nvwa-lite
-docker-compose down
+docker compose down
 git checkout <previous-commit>
 cp .env.backup .env
-docker-compose up -d
+docker compose up -d
 ```
 
 ## Documentation
