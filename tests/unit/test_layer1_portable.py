@@ -516,6 +516,57 @@ class TestPlotting:
         if _SAVE_PLOTS:
             (plot_dir / f"umap_split_by_{profile.condition_column}.png").write_bytes(result.image)
 
+    def test_plot_umap_split_legend_preserves_label_color_mapping(self, adata, profile):
+        """Split UMAP legend must preserve category-color alignment.
+
+        Regression for bug where labels were sorted alphabetically while colors stayed
+        in categorical order, producing mismatched legend entries.
+        """
+        if not profile.has_umap:
+            pytest.skip("Dataset has no X_umap embedding")
+        if not profile.condition_column:
+            pytest.skip("Dataset has no condition column")
+
+        import matplotlib.colors as mcolors
+        import matplotlib.pyplot as plt
+        import pandas as pd
+        from src.domain.plotting import executor
+
+        ad = adata.copy()
+        categories = ["zeta", "alpha", "mu", "beta"]
+        values = [categories[i % len(categories)] for i in range(ad.n_obs)]
+        ad.obs["legend_bug_regression"] = pd.Categorical(values, categories=categories, ordered=True)
+        expected_colors = ["#ff0000", "#00ff00", "#0000ff", "#ffff00"]
+        ad.uns["legend_bug_regression_colors"] = expected_colors
+
+        captured = {}
+        original_figure_to_bytes = executor._figure_to_bytes
+
+        def _capture_figure_to_bytes():
+            fig = plt.gcf()
+            if fig.legends:
+                legend = fig.legends[0]
+                labels = [t.get_text() for t in legend.texts]
+                facecolors = [mcolors.to_hex(h.get_facecolor()) for h in legend.legend_handles]
+                captured["labels"] = labels
+                captured["colors"] = facecolors
+            return original_figure_to_bytes()
+
+        executor._figure_to_bytes = _capture_figure_to_bytes
+        try:
+            result = executor.plot_umap(
+                ad,
+                color="legend_bug_regression",
+                split_by=profile.condition_column,
+                show_legend=True,
+            )
+        finally:
+            executor._figure_to_bytes = original_figure_to_bytes
+
+        assert valid_png(result.image)
+        assert captured["labels"] == categories
+        assert captured["colors"] == expected_colors
+
     def test_plot_umap_invalid_color_raises(self, adata, profile):
         """plot_umap with non-existent color key raises ValueError."""
         if not profile.has_umap:

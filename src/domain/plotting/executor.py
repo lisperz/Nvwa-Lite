@@ -119,20 +119,20 @@ def plot_umap(
         else:
             axes = axes.flatten() if n_groups > 1 else [axes]
 
-        # Get all unique categories and colors from the full dataset for unified legend
+        # Get all categories and colors from full dataset for a consistent legend
         if is_obs and show_legend:
-            all_categories = sorted(adata.obs[color].unique())
-            # Get the color palette scanpy would use
-            if hasattr(adata.uns, f'{color}_colors'):
-                colors = adata.uns[f'{color}_colors']
+            series = adata.obs[color]
+            if hasattr(series, "cat"):
+                all_categories = [str(cat) for cat in series.cat.categories]
             else:
-                # Use scanpy's default palette
-                from matplotlib import cm
+                all_categories = [str(cat) for cat in series.unique()]
+
+            if f"{color}_colors" in adata.uns:
+                colors = list(adata.uns[f"{color}_colors"])
+            else:
                 n_cats = len(all_categories)
                 if n_cats <= 20:
                     colors = [plt.cm.tab20(i) for i in range(n_cats)]
-                elif n_cats <= 28:
-                    colors = [plt.cm.tab20(i % 20) for i in range(n_cats)]
                 else:
                     colors = [plt.cm.tab20(i % 20) for i in range(n_cats)]
 
