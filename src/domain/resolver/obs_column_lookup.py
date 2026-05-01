@@ -19,6 +19,8 @@ import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from src.domain.resolver.column_classifier import Role, get_column_role
+
 if TYPE_CHECKING:
     from anndata import AnnData
 
@@ -43,6 +45,15 @@ _SEMANTIC_MAP: list[tuple[str, list[str]]] = [
     ("treatment", ["orig.ident", "condition", "sample", "batch"]),
     ("batch", ["orig.ident", "condition", "sample", "batch"]),
 ]
+
+
+# Role-fallback keywords. When literal/normalized/semantic-map lookup all fail
+# but the user's input is a known clustering-algorithm keyword, fall back to
+# any column classified as Role.CLUSTERING. Conservative scope — clustering
+# only; other roles deferred until a real failure demands them.
+_CLUSTERING_KEYWORDS: frozenset[str] = frozenset({
+    "leiden", "louvain", "seurat_clusters", "cluster", "clusters",
+})
 
 
 @dataclass
@@ -97,6 +108,35 @@ def lookup_obs_column(adata: "AnnData", raw: str) -> ObsColumnLookupResult:
                             f"(semantic match for '{keyword}')."
                         ),
                     )
+
+    # Role fallback (clustering only): when raw is a known clustering keyword
+    # but no literal candidate matched, look up by role. The resolver records
+    # this as a Canonicalization (raw → canonical), and the responder is
+    # already instructed to surface that to the user.
+    if any(kw in raw_lower for kw in _CLUSTERING_KEYWORDS) or \
+       any(_normalize(kw) in raw_norm for kw in _CLUSTERING_KEYWORDS):
+        cols_of_role = [
+            c for c in all_cols
+            if get_column_role(adata, c) == Role.CLUSTERING
+        ]
+        if len(cols_of_role) == 1:
+            return ObsColumnLookupResult(
+                matched=True, input_name=raw, resolved_name=cols_of_role[0],
+                strategy="role_fallback",
+                message=(
+                    f"obs column '{raw}' resolved to '{cols_of_role[0]}' "
+                    f"(clustering-role fallback)."
+                ),
+            )
+        if len(cols_of_role) > 1:
+            return ObsColumnLookupResult(
+                matched=False, input_name=raw, resolved_name=None,
+                strategy="role_ambiguous", candidates=cols_of_role,
+                message=(
+                    f"'{raw}' could match {len(cols_of_role)} clustering "
+                    f"columns: {', '.join(cols_of_role)}."
+                ),
+            )
 
     if len(raw_lower) >= 3:
         substring_hits = sorted({

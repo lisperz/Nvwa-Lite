@@ -130,6 +130,10 @@ Examples:
   OUT:  {{"scenario_id":"qc","tool_name":"qc_violin_plot","pre_canonical_params":{{"groupby":"cell type","split_by":"condition"}}}}
   (Note: Yalu §2A.2 — same QC violin, gridded per condition. "split by condition" → split_by.)
 
+  USER: "Show me the ribosomal RNA percentage per cell"
+  OUT:  {{"scenario_id":"qc","tool_name":"qc_violin_plot","pre_canonical_params":{{"metrics":["pct_counts_rb"]}}}}
+  (Note: when the user names a SPECIFIC QC metric — ribosomal / "rRNA" / "ribo", or any non-default metric — pass it explicitly via the metrics list. Do NOT leave metrics empty; the auto-detect only covers nCount/nFeature/pct_counts_mt and would silently substitute those when the request was for something else. The tool reports the column missing if the dataset lacks it.)
+
   USER: "yes" / "yes please" / "go ahead" (after the assistant offered a volcano plot in the prior turn)
   OUT:  {{"scenario_id":"plot","tool_name":"volcano_plot","pre_canonical_params":{{}}}}
   (volcano_plot with no params plots the most recent run_de result from adata.uns.)

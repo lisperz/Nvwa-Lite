@@ -189,12 +189,15 @@ tests:
     prompt: "Show a violin plot for FAKEGENE999."
     expected_status: FAIL
     must_contain:
-      - "not found"
+      - "FAKEGENE999"
     notes: >
       Gene validation: FAKEGENE999 does not exist. Agent must report the gene
-      is missing (and ideally suggest alternatives). Updated 2026-04-24: agent
-      consistently says "not found" (matches gene_lookup wording); previous
-      "not present" assertion was a stale artifact of an earlier prompt rev.
+      is missing. Asserts the user's literal input is echoed (proving the
+      agent processed it without silent substitution) — more robust than
+      coupling to specific failure-message wording. Updated 2026-04-30:
+      switched from "not found" to "FAKEGENE999" echo (prior wording assertion
+      kept rotting as renderer wording improved; behavior-level echo is
+      stable across wording changes).
 
   - case_id: DA-10
     category: data_analysis
@@ -217,14 +220,17 @@ tests:
       Do not choose any other gene. Do not substitute or auto-select genes.
     expected_status: FAIL
     must_contain:
-      - "not found"
+      - "leiden"
     must_not_contain:
       - "successfully generated"
     notes: >
       obs-field mistaken as gene: leiden is a cluster label, not a gene.
       Explicit phrasing forces the LLM to look up "leiden" as a gene name
       so the gene validator fires. Without the constraint the LLM auto-recovers
-      by picking real marker genes.
+      by picking real marker genes. Updated 2026-04-30: switched
+      must_contain from "not found" to "leiden" echo (behavior-level echo
+      is stable across wording changes; previous wording assertion was tied
+      to a specific renderer phrasing that improved).
 
   - case_id: DA-12
     category: data_analysis

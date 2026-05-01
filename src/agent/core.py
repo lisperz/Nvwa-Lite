@@ -44,7 +44,7 @@ from src.agent.tools import (
     get_table_results,
 )
 from src.agent.viz_state import VisualizationState, bind_viz_state
-from src.core.registry import REGISTRY, get_tool
+from src.core.registry import get_tool
 from src.core.results import ArtifactResult, TextResult, ToolExecutionError
 from src.domain.resolver.resolver import resolve
 from src.platform.infra.db.logger import DatabaseLogger
@@ -65,6 +65,7 @@ class AgentResponse:
 
     text: str
     tool_called: bool
+    routed_via: str  # "spec" | "legacy" | "plain_llm"
 
 
 @dataclass
@@ -79,17 +80,6 @@ class _PathResult:
 
 
 # Per-reason wording for needs_input rendering (Q6: generic MVP template).
-_REASON_DETAIL: dict[str, str] = {
-    "missing": "value missing",
-    "not_found": "not found in the dataset",
-    "ambiguous": "ambiguous match",
-    "wrong_field": "looks like it belongs to a different field",
-    "wrong_type": "wrong type",
-    "unknown_tool": "tool not recognized",
-    "unknown_scenario": "scenario not recognized",
-}
-
-
 def _classify_tool_status(result: object) -> tuple[str, str | None]:
     """Infer (status, error_msg) from a tool return value.
 
@@ -105,16 +95,76 @@ def _classify_tool_status(result: object) -> tuple[str, str | None]:
     return ("success", None)
 
 
-def _render_needs_input(issues: list[Issue]) -> str:
-    """Deterministic template for needs_input responses (one line per issue)."""
+_FIELD_TYPE_LABEL = {
+    "gene": "gene",
+    "cell_type": "cell type",
+    "condition": "condition",
+    "obs_column": "column",
+}
+
+
+def _render_needs_input(
+    issues: list[Issue],
+    pre_canonical_params: dict,
+    field_types: dict,
+) -> str:
+    """Render Issue list as a user-facing clarification message.
+
+    Echoes the user's attempted value (from pre_canonical_params) and uses the
+    parameter's domain category (from field_types) to pick wording — keeps
+    internal parameter names out of the message.
+    """
     lines: list[str] = []
     for issue in issues:
-        field_name = issue.field.removeprefix("params.")
-        detail = _REASON_DETAIL.get(issue.reason, issue.reason)
-        suggestion_str = ""
-        if issue.suggestions:
-            suggestion_str = f" Suggestions: {', '.join(str(s) for s in issue.suggestions)}."
-        lines.append(f"I need clarification on {field_name}: {detail}.{suggestion_str}")
+        if issue.reason == "unknown_tool":
+            lines.append(
+                "I couldn't match your request to a specific analysis I can run. "
+                "Could you rephrase — for example, 'plot CD8A expression' or "
+                "'run differential expression between clusters 1 and 5'?"
+            )
+            continue
+
+        # field is "params.<name>" or "params.<name>[idx]" for list elements
+        raw_field = issue.field.removeprefix("params.")
+        param_name = raw_field.split("[", 1)[0]
+        attempted = pre_canonical_params.get(param_name)
+        if "[" in raw_field and isinstance(attempted, list):
+            try:
+                idx = int(raw_field[raw_field.index("[") + 1 : raw_field.index("]")])
+                attempted = attempted[idx]
+            except (ValueError, IndexError):
+                attempted = None
+        ftype = field_types.get(param_name)
+        sug = ", ".join(str(s) for s in issue.suggestions[:3])
+
+        if issue.reason == "wrong_field" and issue.suggestions:
+            other = str(issue.suggestions[0]).split("=", 1)[0]
+            v = f"'{attempted}'" if attempted is not None else "that value"
+            lines.append(
+                f"{v} looks like it belongs to '{other}', not "
+                f"'{_FIELD_TYPE_LABEL.get(ftype, param_name)}'."
+            )
+        elif attempted is None:
+            tail = f" Suggestions: {sug}." if sug else ""
+            lines.append(
+                f"I need to know the {_FIELD_TYPE_LABEL.get(ftype, 'value')} "
+                f"for this analysis.{tail}"
+            )
+        elif ftype == "gene":
+            tail = f" Did you mean: {sug}?" if sug else ""
+            lines.append(f"I don't see '{attempted}' as a gene in the dataset.{tail}")
+        elif ftype == "cell_type":
+            tail = f" Available cell types: {sug}." if sug else ""
+            lines.append(f"I don't see '{attempted}' as a cell type in the dataset.{tail}")
+        elif ftype == "condition":
+            tail = f" Available conditions: {sug}." if sug else ""
+            lines.append(f"I don't see '{attempted}' as a condition in the dataset.{tail}")
+        elif ftype == "obs_column":
+            tail = f" Available columns: {sug}." if sug else ""
+            lines.append(f"I don't see a column named '{attempted}' in the dataset.{tail}")
+        else:
+            tail = f" Suggestions: {sug}." if sug else ""
+            lines.append(f"I don't see '{attempted}' in the dataset.{tail}")
     return "\n".join(lines)
 
 
@@ -239,8 +289,12 @@ class AgentRunner:
                 result = self._run_spec_pipeline(user_input, history, turn_id)
                 if result is None:
                     result = self._run_langchain_loop(user_input, history, turn_id)
+                    routed_via = "legacy"
+                else:
+                    routed_via = "spec"
             elif router_result.layer == "2b":
                 result = self._run_plain_llm(user_input, history)
+                routed_via = "plain_llm"
             else:
                 # Ambiguous: try the extractor first (it's a more sophisticated
                 # tool-selector than the router's keyword map). If the extractor
@@ -253,6 +307,9 @@ class AgentRunner:
                 result = self._run_spec_pipeline(user_input, history, turn_id)
                 if result is None:
                     result = self._run_langchain_loop(user_input, history, turn_id)
+                    routed_via = "legacy"
+                else:
+                    routed_via = "spec"
 
             response_time = time.time() - start_time
             self._log_post_turn(
@@ -261,7 +318,11 @@ class AgentRunner:
                 response_time=response_time,
                 turn_id=turn_id,
             )
-            return AgentResponse(text=result.text, tool_called=result.tool_called)
+            return AgentResponse(
+                text=result.text,
+                tool_called=result.tool_called,
+                routed_via=routed_via,
+            )
 
         except Exception:
             if self._db_logger and self._user_id and self._session_id:
@@ -287,6 +348,11 @@ class AgentRunner:
             spec = extract(user_input, chat_history)
         except Exception as e:
             logger.warning("Extractor failed, falling back to LangChain loop: %s", e)
+            self._log_session_event("extractor_failed", {
+                "turn_id": turn_id,
+                "error_class": type(e).__name__,
+                "error_msg": str(e)[:500],
+            })
             return None
 
         if spec.tool_name == "none":
@@ -296,13 +362,6 @@ class AgentRunner:
                 "scenario_id": spec.scenario_id,
                 "pre_canonical_params": spec.pre_canonical_params,
             })
-            return None
-
-        if spec.tool_name not in REGISTRY:
-            logger.info(
-                "Extractor picked unknown tool %r; falling back to LangChain loop",
-                spec.tool_name,
-            )
             return None
 
         self._log_session_event("spec_emitted", {
@@ -330,8 +389,10 @@ class AgentRunner:
         })
 
         if resolver_issues:
+            entry = get_tool(spec.tool_name)
+            field_types = {p.name: p.field_type for p in entry.params if p.field_type} if entry else {}
             return _PathResult(
-                text=_render_needs_input(resolver_issues),
+                text=_render_needs_input(resolver_issues, spec.pre_canonical_params, field_types),
                 tool_called=False,
                 end_reason="normal",
             )
@@ -345,10 +406,10 @@ class AgentRunner:
         })
 
         if val_result.status == "needs_input":
-            if any(i.reason == "unknown_tool" for i in val_result.issues):
-                return None
+            entry = get_tool(spec.tool_name)
+            field_types = {p.name: p.field_type for p in entry.params if p.field_type} if entry else {}
             return _PathResult(
-                text=_render_needs_input(val_result.issues),
+                text=_render_needs_input(val_result.issues, spec.pre_canonical_params, field_types),
                 tool_called=False,
                 end_reason="normal",
             )

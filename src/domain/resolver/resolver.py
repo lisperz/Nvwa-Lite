@@ -186,7 +186,7 @@ def _dispatch(
         r = lookup_obs_column(adata, raw)
         if r.matched:
             return r.resolved_name, [], None, None
-        reason = "ambiguous" if r.strategy == "substring_ambiguous" else "not_found"
+        reason = "ambiguous" if r.strategy in ("substring_ambiguous", "role_ambiguous") else "not_found"
         return None, r.candidates, reason, None
 
     return None, [], "wrong_type", None

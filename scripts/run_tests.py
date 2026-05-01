@@ -109,6 +109,7 @@ class CaseResult:
     duration_s: float = 0.0
     final_text: str = ""
     tool_called: bool = False
+    routed_via: str = "unknown"   # spec | legacy | plain_llm | unknown (pre-flight / error)
     plot_count: int = 0           # number of valid PlotResults produced
     table_count: int = 0          # number of valid TableResults produced
     failures: list[str] = field(default_factory=list)
@@ -160,11 +161,11 @@ def run_one(
     api_key: str,
     model: str,
     cache_nonce: str | None = None,
-) -> tuple[str, bool, list, list]:
+) -> tuple[str, bool, str, list, list]:
     """
     Load a fresh AnnData, create the agent, invoke the prompt, and collect artifacts.
 
-    Returns (final_text, tool_called, plot_results, table_results).
+    Returns (final_text, tool_called, routed_via, plot_results, table_results).
     Raises on hard failures (caller catches and marks as error).
 
     If cache_nonce is set, a leading `[regression-run-id: <nonce>]` tag is
@@ -226,7 +227,7 @@ def run_one(
     plot_results = get_plot_results() + artifacts.get_plot_results()
     table_results = get_table_results() + artifacts.get_table_results()
 
-    return resp.text, resp.tool_called, plot_results, table_results
+    return resp.text, resp.tool_called, resp.routed_via, plot_results, table_results
 
 
 # ── Assertion check ────────────────────────────────────────────────────────────
@@ -350,8 +351,8 @@ def write_report(
         "",
         "## Per-case Results",
         "",
-        "| case_id | category | status | duration | artifacts | failure reason |",
-        "|---------|----------|--------|----------|-----------|----------------|",
+        "| case_id | category | status | routed_via | duration | artifacts | failure reason |",
+        "|---------|----------|--------|------------|----------|-----------|----------------|",
     ]
 
     for r in results:
@@ -359,6 +360,7 @@ def write_report(
         reason = "; ".join(r.failures[:2]) if r.failures else (r.notes[:60] if r.status == "skip" else "—")
         lines.append(
             f"| {r.case_id} | {r.category} | {icon} {r.status.upper()} "
+            f"| {r.routed_via} "
             f"| {r.duration_s:.1f}s | {_artifact_label(r)} "
             f"| {reason} |"
         )
@@ -639,12 +641,13 @@ def main() -> int:
 
             t0 = time.monotonic()
             try:
-                final_text, tool_called, plot_results, table_results = run_one(
+                final_text, tool_called, routed_via, plot_results, table_results = run_one(
                     tc, dataset_path, args.api_key, args.model, cache_nonce=nonce
                 )
                 result.duration_s = time.monotonic() - t0
                 result.final_text = final_text
                 result.tool_called = tool_called
+                result.routed_via = routed_via
                 result.plot_count = sum(1 for p in plot_results if _valid_plot(p))
                 result.table_count = sum(1 for t in table_results if _valid_table(t))
 
@@ -706,6 +709,7 @@ def main() -> int:
                         "status": r.status,
                         "duration_s": r.duration_s,
                         "tool_called": r.tool_called,
+                        "routed_via": r.routed_via,
                         "plot_count": r.plot_count,
                         "table_count": r.table_count,
                         "notes": r.notes,

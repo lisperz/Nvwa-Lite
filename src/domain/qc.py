@@ -188,6 +188,20 @@ def qc_violin_plot(
 
     metric_cols = _resolve_metrics(adata, metrics)
     if not metric_cols:
+        if metrics:
+            # User asked for specific QC columns that don't exist in this
+            # dataset. Surface what they asked for + what's available so the
+            # responder can frame the missing-column case honestly without
+            # falling back to "couldn't make the violin plot" framing.
+            available = _resolve_metrics(adata, None)
+            avail_str = (
+                f" Available QC metrics in this dataset: {', '.join(available)}."
+                if available else ""
+            )
+            raise ToolExecutionError(
+                f"Requested QC column(s) {metrics!r} not found in adata.obs.{avail_str}",
+                tool_name="qc_violin_plot",
+            )
         raise ToolExecutionError(
             "No QC metrics found in adata.obs (looked for nFeature_RNA / "
             "n_genes_by_counts, nCount_RNA / total_counts, pct_counts_mt). "
