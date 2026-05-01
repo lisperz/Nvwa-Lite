@@ -138,7 +138,7 @@ def discover_profile(adata: "AnnData", name: str = "unknown") -> DatasetProfile:
     Uses existing detection functions from src.domain.analysis to avoid duplicating logic.
     """
     from src.domain.analysis.cluster_resolution import detect_grouping_columns
-    from src.domain.analysis.qc_metrics import resolve_qc_metric_column
+    from src.domain.qc_metrics import resolve_qc_metric_column
     from src.core.types import detect_dataset_state
 
     state = detect_dataset_state(adata, filename=name)
@@ -204,7 +204,7 @@ def adata():
 
     Session-scoped so the h5ad file is read only once across all test files.
     """
-    from src.domain.analysis.h5ad_loader import load_h5ad
+    from src.domain.h5ad_loader import load_h5ad
 
     if not DATASET_PATH.exists():
         pytest.skip(f"Dataset not found: {DATASET_PATH}")

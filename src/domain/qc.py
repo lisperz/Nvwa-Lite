@@ -18,7 +18,7 @@ import scanpy as sc
 from src.agent.viz_state import update_viz_state
 from src.core.registry import register
 from src.core.results import ArtifactResult, ToolExecutionError
-from src.domain.analysis.qc_metrics import resolve_qc_metric_column, summarize_qc_metrics
+from src.domain.qc_metrics import resolve_qc_metric_column, summarize_qc_metrics
 
 if TYPE_CHECKING:
     from anndata import AnnData
@@ -51,7 +51,7 @@ def qc_summary_table(
 ) -> ArtifactResult:
     """Compute dataset-level QC summary + automated flagging per Yalu Layer 3.
 
-    Wraps src.domain.analysis.qc_metrics.summarize_qc_metrics (cross-cutting
+    Wraps src.domain.qc_metrics.summarize_qc_metrics (cross-cutting
     primitive that handles column-name resolution across naming conventions:
     nFeature_RNA / n_genes_by_counts, nCount_RNA / total_counts, etc.).
     """

@@ -59,7 +59,7 @@ def main() -> int:
         return 2
 
     from src.agent.core import create_agent
-    from src.domain.analysis.h5ad_loader import load_h5ad
+    from src.domain.h5ad_loader import load_h5ad
     from src.platform.observability import events as logging_service
     from src.core.types import detect_dataset_state
 

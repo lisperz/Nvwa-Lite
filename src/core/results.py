@@ -1,13 +1,19 @@
-"""Tool-output schema for the spec pipeline.
+"""Tool-output schema for the spec pipeline (and shape carriers for legacy plot/table results).
 
-Discriminated union: TextResult (text-only) | ArtifactResult (image/csv + metadata).
-Replaces the legacy str-prefix "Error:" status convention for @register tools;
-legacy LangChain-loop tools in src/agent/tools.py still use the str convention
-(_classify_tool_status in src/agent/core.py keeps handling that path).
+Spec pipeline (canonical):
+- Discriminated union: TextResult (text-only) | ArtifactResult (image/csv + metadata).
+- Replaces the legacy str-prefix "Error:" status convention for @register tools;
+  legacy LangChain-loop tools in src/agent/tools.py still use the str convention
+  (_classify_tool_status in src/agent/core.py keeps handling that path).
+- Bytes carried on ArtifactResult are bridged into the legacy artifact channel
+  by src/agent/artifacts.consume_artifact_result, so UI consumption in
+  src/ui/app.py stays unchanged during migration.
 
-Bytes carried on ArtifactResult are bridged into the legacy artifact channel
-by src/agent/artifacts.consume_artifact_result, so UI consumption in
-src/ui/app.py stays unchanged during migration.
+Legacy plot/table dataclasses (PlotResult, TableResult) live here too — moved
+from src/domain/plotting/executor.py in Stage 1 of the legacy decoupling plan
+(local/strategy/legacy_decoupling_plan_2026-04-30.md). executor.py re-exports
+them for legacy callers; both the re-export and the legacy plot_* functions
+are deleted in Stage 3.
 """
 
 from __future__ import annotations
@@ -54,6 +60,25 @@ class ArtifactResult:
 
 
 ToolResult = TextResult | ArtifactResult
+
+
+@dataclass
+class PlotResult:
+    """Bundle of plot output: image bytes, source code, and description."""
+
+    image: bytes
+    code: str
+    message: str
+
+
+@dataclass
+class TableResult:
+    """Bundle of table output: CSV data, source code, and description."""
+
+    csv_data: str
+    code: str
+    message: str
+    display_df: str  # HTML or markdown representation for display
 
 
 class ToolExecutionError(Exception):

@@ -20,14 +20,14 @@ if _PROJECT_ROOT not in sys.path:
 import streamlit as st
 
 from src.agent.core import create_agent
-from src.domain.analysis.h5ad_loader import load_h5ad
+from src.domain.h5ad_loader import load_h5ad
 from src.domain.resolver.column_classifier import classify as classify_columns
 from src.domain.resolver.species_detector import detect_species
 from src.agent import artifacts
 from src.agent.tools import clear_plot_results, clear_table_results, get_plot_results, get_table_results, set_adata_replaced_callback, set_plot_generated_callback
 from src.agent.viz_state import VisualizationState, get_viz_state
 from src.platform.infra.auth import AuthService
-from src.domain.plotting.styles import configure_plot_style
+from src.domain.plot_style import configure_plot_style
 from src.session.manager import SessionManager
 from src.core.types import DatasetState, detect_dataset_state
 from src.ui.components import (

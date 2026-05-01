@@ -11,8 +11,7 @@ the legacy getters go away and this becomes the sole artifact channel.
 
 from __future__ import annotations
 
-from src.core.results import ArtifactResult
-from src.domain.plotting.executor import PlotResult, TableResult
+from src.core.results import ArtifactResult, PlotResult, TableResult
 
 
 _plot_results: list[PlotResult] = []

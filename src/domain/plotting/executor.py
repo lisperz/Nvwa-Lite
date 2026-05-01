@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import io
 import logging
-from dataclasses import dataclass
 
 import matplotlib.pyplot as plt
 import scanpy as sc
@@ -16,26 +15,13 @@ from anndata import AnnData
 
 from src.core.adata_schema import gene_exists, validate_gene, validate_obs_key
 
+# Re-export for legacy callers (src/agent/{tools,subset_tools,analysis_tools}.py,
+# src/domain/plotting/{volcano,composition}.py, and tests of legacy plot_* functions).
+# Canonical home is src/core/results.py since Stage 1 of the legacy decoupling plan.
+# This re-export and the legacy plot_* functions below are deleted in Stage 3.
+from src.core.results import PlotResult, TableResult  # noqa: F401
+
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class PlotResult:
-    """Bundle of plot output: image bytes, source code, and description."""
-
-    image: bytes
-    code: str
-    message: str
-
-
-@dataclass
-class TableResult:
-    """Bundle of table output: CSV data, source code, and description."""
-
-    csv_data: str
-    code: str
-    message: str
-    display_df: str  # HTML or markdown representation for display
 
 
 def _figure_to_bytes() -> bytes:

@@ -143,7 +143,7 @@ def load_adata(dataset_path: Path) -> Any:
     `adata.uns["nvwa_meta"]`; without it, spec-pipeline tools like
     `dataset_overview` see an empty meta and return only the bare header line.
     """
-    from src.domain.analysis.h5ad_loader import load_h5ad
+    from src.domain.h5ad_loader import load_h5ad
     from src.domain.resolver.column_classifier import classify as classify_columns
     from src.domain.resolver.species_detector import detect_species
 
@@ -622,7 +622,7 @@ def main() -> int:
 
             # Pre-flight: dataset capability checks (cheap, no agent invocation).
             if tc.get("requires_precomputed_umap"):
-                from src.domain.analysis.h5ad_loader import load_h5ad as _load_h5ad
+                from src.domain.h5ad_loader import load_h5ad as _load_h5ad
                 _adata_check = _load_h5ad(dataset_path)
                 if "X_umap" not in _adata_check.obsm:
                     result.status = "fail"

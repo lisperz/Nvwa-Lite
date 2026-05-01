@@ -5,7 +5,7 @@ import pandas as pd
 import pytest
 from anndata import AnnData
 
-from src.domain.analysis.qc_metrics import summarize_qc_metrics
+from src.domain.qc_metrics import summarize_qc_metrics
 
 
 @pytest.fixture

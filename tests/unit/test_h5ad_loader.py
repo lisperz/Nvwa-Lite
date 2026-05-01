@@ -12,7 +12,7 @@ import pandas as pd
 import pytest
 from anndata import AnnData
 
-from src.domain.analysis.h5ad_loader import (
+from src.domain.h5ad_loader import (
     SEURAT_TO_SCANPY_OBSM,
     rename_seurat_obsm_keys,
 )

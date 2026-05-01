@@ -27,12 +27,12 @@ class TestQCMetrics:
 
     def test_resolve_unknown_metric_returns_none(self, adata):
         """Unknown metric name returns None, not an error."""
-        from src.domain.analysis.qc_metrics import resolve_qc_metric_column
+        from src.domain.qc_metrics import resolve_qc_metric_column
         assert resolve_qc_metric_column(adata, "nonexistent_metric_xyz_abc") is None
 
     def test_resolve_known_metric_returns_string(self, adata, profile):
         """Any discovered QC column resolves to a non-empty string."""
-        from src.domain.analysis.qc_metrics import resolve_qc_metric_column
+        from src.domain.qc_metrics import resolve_qc_metric_column
         col = profile.qc_counts_column or profile.qc_mito_column or profile.qc_genes_column
         if col is None:
             pytest.skip("No QC columns found in this dataset")
@@ -41,7 +41,7 @@ class TestQCMetrics:
 
     def test_obs_statistics_n_cells_matches_dataset(self, adata, profile):
         """Statistics n_cells equals adata.n_obs."""
-        from src.domain.analysis.qc_metrics import get_obs_column_statistics
+        from src.domain.qc_metrics import get_obs_column_statistics
         col = profile.qc_counts_column or profile.qc_mito_column or profile.qc_genes_column
         if col is None:
             pytest.skip("No numeric QC column found")
@@ -50,7 +50,7 @@ class TestQCMetrics:
 
     def test_obs_statistics_mean_in_range(self, adata, profile):
         """Mean is between min and max."""
-        from src.domain.analysis.qc_metrics import get_obs_column_statistics
+        from src.domain.qc_metrics import get_obs_column_statistics
         col = profile.qc_counts_column or profile.qc_mito_column or profile.qc_genes_column
         if col is None:
             pytest.skip("No numeric QC column found")
@@ -59,7 +59,7 @@ class TestQCMetrics:
 
     def test_obs_statistics_quartiles_ordered(self, adata, profile):
         """q25 <= median <= q75."""
-        from src.domain.analysis.qc_metrics import get_obs_column_statistics
+        from src.domain.qc_metrics import get_obs_column_statistics
         col = profile.qc_counts_column or profile.qc_mito_column or profile.qc_genes_column
         if col is None:
             pytest.skip("No numeric QC column found")
@@ -68,14 +68,14 @@ class TestQCMetrics:
 
     def test_obs_statistics_invalid_column_raises(self, adata):
         """Non-existent column raises ValueError."""
-        from src.domain.analysis.qc_metrics import get_obs_column_statistics
+        from src.domain.qc_metrics import get_obs_column_statistics
         with pytest.raises(ValueError):
             get_obs_column_statistics(adata, "nonexistent_col_xyz")
 
     def test_summarize_qc_returns_dataframe(self, adata, profile):
         """summarize_qc_metrics returns a non-empty DataFrame with expected columns."""
         import pandas as pd
-        from src.domain.analysis.qc_metrics import summarize_qc_metrics
+        from src.domain.qc_metrics import summarize_qc_metrics
         cols = [c for c in [profile.qc_counts_column, profile.qc_genes_column, profile.qc_mito_column] if c]
         if not cols:
             pytest.skip("No QC columns found in this dataset")

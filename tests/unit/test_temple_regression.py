@@ -113,7 +113,7 @@ class TestTempleBiology:
 
     def test_qc_mito_stats(self, adata):
         """percent.mito mean matches known Temple value (~7.31)."""
-        from src.domain.analysis.qc_metrics import get_obs_column_statistics
+        from src.domain.qc_metrics import get_obs_column_statistics
         stats = get_obs_column_statistics(adata, "percent.mito")
         assert stats["n_cells"] == _TEMPLE_N_CELLS
         assert abs(stats["mean"] - 7.31) < 0.5
