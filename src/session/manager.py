@@ -85,7 +85,12 @@ class SessionManager:
                     decode_responses=True,
                 )
                 redis_client.ping()  # Test connection
-            except (redis.ConnectionError, redis.TimeoutError):
+            except (redis.ConnectionError, redis.TimeoutError) as e:
+                logger.warning(
+                    "Redis ping failed at localhost:6379 (%s); falling back to in-memory "
+                    "session storage. Sessions will not persist across app restarts.",
+                    e,
+                )
                 redis_client = None
 
         self.redis = redis_client

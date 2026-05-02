@@ -89,7 +89,12 @@ def get_session_manager():
     try:
         redis_client = redis.Redis(host=redis_host, port=redis_port, decode_responses=True)
         redis_client.ping()
-    except (redis.ConnectionError, redis.TimeoutError):
+    except (redis.ConnectionError, redis.TimeoutError) as e:
+        logger.warning(
+            "Redis ping failed at %s:%s (%s); falling back to in-memory session storage. "
+            "Sessions will not persist across app restarts and will not be visible to other replicas.",
+            redis_host, redis_port, e,
+        )
         redis_client = None
 
     return SessionManager(
