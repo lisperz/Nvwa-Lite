@@ -77,8 +77,9 @@ TOOL_INTENT_MAP: list[tuple[str, set[str]]] = [
         "read depth",
     }),
     # --- Visualization ---
-    # highlight_cluster and feature_plot must come before umap_plot —
-    # their prompts often contain "umap" as context, not as the task.
+    # highlight_cluster, feature_plot, violin_plot, and dotplot must come before umap_plot —
+    # their prompts often contain generic keywords like "split by" that would otherwise
+    # match umap_plot first. Explicit plot type keywords should take precedence.
     ("highlight_cluster", {
         "highlight cluster", "focus on cluster", "show only cluster",
     }),
@@ -86,14 +87,14 @@ TOOL_INTENT_MAP: list[tuple[str, set[str]]] = [
         "feature plot", "gene on umap", "expression on umap",
         "where is expressed", "color umap by gene",
     }),
-    ("umap_plot", {
-        "umap", "embedding", "dimensionality reduction", "cell map", "split by",
-    }),
     ("violin_plot", {
         "violin", "expression distribution", "gene distribution",
     }),
     ("dotplot", {
         "dot plot", "dotplot", "bubble plot",
+    }),
+    ("umap_plot", {
+        "umap", "embedding", "dimensionality reduction", "cell map", "split by",
     }),
     ("heatmap_plot", {
         "heatmap", "heat map", "expression matrix",

@@ -294,7 +294,14 @@ def test_non_qc_split_by_routes_preserved(prompt, expected_tool):
     "Show a bubble plot of TNNT2 across cell types",
 ])
 def test_dotplot_plain_cell_type_routes_to_dotplot(prompt):
-    """Plain 'across cell types' without condition language must route to dotplot, not dotplot_matrix."""
+    """Plain 'across cell types' without condition language must route to dotplot.
+
+    Router-level coverage: The router (classify_intent) only returns tool name, not arguments.
+    This test verifies that plain "across cell types" prompts route to dotplot.
+
+    Note: dotplot_matrix is not in the router's keyword map. Matrix vs single-dimension
+    selection happens later via prompt guidance and LLM/extractor logic, not at router level.
+    """
     result = classify_intent(prompt)
     assert result.layer == "2a", (
         f"Expected layer '2a' for: '{prompt}'\n"
@@ -303,4 +310,38 @@ def test_dotplot_plain_cell_type_routes_to_dotplot(prompt):
     assert result.task_type == "dotplot", (
         f"Expected task_type='dotplot' for: '{prompt}'\n"
         f"Got task_type='{result.task_type}', matched_on='{result.matched_on}'"
+    )
+
+
+def test_dotplot_split_by_condition_routes_to_dotplot_not_umap():
+    """Explicit 'dot plot' + 'split by condition' must route to dotplot, not umap_plot.
+
+    Regression guard for router keyword priority fix (PR #64 follow-up).
+    Before fix: "split by" matched umap_plot first.
+    After fix: explicit "dot plot" takes precedence over generic "split by".
+
+    Router-level coverage: This only tests keyword matching, not LLM-generated arguments.
+    Whether the LLM adds condition-split parameters is tested separately via prompt guidance.
+    """
+    prompt = "Show a dot plot of Nppa, Nppb, Myh7, Myh6 across all cell types split by condition"
+    result = classify_intent(prompt)
+
+    assert result.layer == "2a", (
+        f"Expected layer '2a' for: '{prompt}'\n"
+        f"Got layer='{result.layer}', matched_on='{result.matched_on}'"
+    )
+    assert result.task_type == "dotplot", (
+        f"Expected task_type='dotplot' for: '{prompt}'\n"
+        f"Got task_type='{result.task_type}', matched_on='{result.matched_on}'"
+    )
+    # Explicit negative assertion: must NOT route to umap_plot
+    assert result.task_type != "umap_plot", (
+        f"Explicit 'dot plot' must take precedence over generic 'split by'.\n"
+        f"Prompt: '{prompt}'\n"
+        f"Got task_type='{result.task_type}'"
+    )
+    # Verify the matched keyword
+    assert result.matched_on == "dot plot", (
+        f"Expected matched_on='dot plot' for: '{prompt}'\n"
+        f"Got matched_on='{result.matched_on}'"
     )
